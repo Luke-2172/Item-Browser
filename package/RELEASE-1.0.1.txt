@@ -1,0 +1,23 @@
+Luke's Item Browser 1.0.1 - rendering resilience update
+
+- Capture directly imported Direct3DCreate9Ex as well as dynamic lookups.
+- Present and PresentEx fallback when the captured device does not deliver EndScene.
+- Keep original rendering callbacks separately for each captured device vtable.
+- Handle ResetEx alongside Reset and recreate the menu texture after reset.
+- Independent Windows hotkey monitor logs key presses even without renderer callbacks.
+- Discard stale open requests and release input blocking if frames stop or focus leaves.
+- Retry texture allocation at lower resolution, without overwriting the user's INI.
+- Set explicit texture addressing, mip filtering and stencil state for the overlay.
+- Log graphics failures with HRESULT values and unsupported-runtime query failures.
+
+Install this archive as a replacement for 1.0. Keep only one browser version enabled.
+Dependencies are unchanged. The MCM integration remains optional and ESP-free.
+
+This improves specific failure paths; it does not guarantee compatibility with
+DXVK, ENB, ReShade or other hooks. If device creation bypasses every intercepted
+path, this build still cannot discover that device. No blind memory scanning,
+game-address patching, forced window focus, or replacement graphics DLL is used.
+The hotkey monitor can diagnose missing renderer callbacks but cannot draw without
+a captured renderer. Actual wrapper, Alt-Tab and fullscreen testing is still needed.
+
+See COMPATIBILITY.txt for troubleshooting and SECURITY-REVIEW.txt for test scope.

@@ -9,6 +9,7 @@
 #include <thread>
 #include <sstream>
 #include <cmath>
+#include <map>
 #include "catalog.h"
 #include "importhook.h"
 
@@ -41,6 +42,9 @@ static int searchScope=2; // 1=plugins, 2=items, independent of keyboard focus.
 static std::string query,pluginQuery;
 static std::vector<int> filteredPlugins;
 static UINT hotkey=VK_F11;
+static std::atomic<bool> monitorActive{false},toggleQueued{false};
+static std::atomic<DWORD> lastFrameTick{0},toggleTick{0};
+static bool consumeToggle(DWORD now) {return toggleQueued.exchange(false)&&now-toggleTick.load()<2000;}
 static float cursorX=550,cursorY=350;
 static bool previousKeys[256]{};
 static HWND gameWindow=nullptr;
@@ -56,9 +60,16 @@ static ib::Inflate inflateFn=nullptr;
 static std::atomic<bool> frameSeen{false},inputReady{false};
 constexpr int Width=1120,Height=700;
 static int renderScale=2;
+static void destroyCanvas() {
+ if(canvas)DeleteDC(canvas);canvas=nullptr;
+ if(bitmap)DeleteObject(bitmap);bitmap=nullptr;pixels=nullptr;
+ for(auto f:{font,titleFont,smallFont,detailFont})if(f)DeleteObject(f);
+ font=titleFont=smallFont=detailFont=nullptr;
+}
 static int rasterWidth() {return Width*renderScale;}
 static int rasterHeight() {return Height*renderScale;}
 static bool createCanvas() {
+ destroyCanvas();
  BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=rasterWidth();bi.bmiHeader.biHeight=-rasterHeight();bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
  canvas=CreateCompatibleDC(nullptr);bitmap=CreateDIBSection(canvas,&bi,DIB_RGB_COLORS,&pixels,nullptr,0);
  if(!canvas||!bitmap||!pixels)return false;
@@ -83,6 +94,14 @@ static void nativeStatus(const wchar_t* key,const wchar_t* value) {
 static void failNative(const char* reason) {
  logLine(reason);std::wstring message;for(auto c:std::string(reason))message.push_back((unsigned char)c);
  nativeStatus(L"Error",message.c_str());
+}
+static void graphicsError(const char* operation,HRESULT hr) {
+ static std::mutex errorMutex;std::lock_guard<std::mutex> guard(errorMutex);
+ // Suppress identical per-frame failures without hiding changes in failure stage.
+ static std::string last;static DWORD when=0;
+ char message[192];sprintf_s(message,"%s failed (HRESULT 0x%08lX)",operation,(unsigned long)hr);
+ DWORD now=GetTickCount();if(last==message && now-when<5000)return;
+ last=message;when=now;failNative(message);
 }
 static std::wstring wide(const std::string& s) {
  if(s.empty()) return L""; int n=MultiByteToWideChar(CP_ACP,0,s.data(),(int)s.size(),nullptr,0);
@@ -356,7 +375,8 @@ static void inputs() {
  DWORD process=0; GetWindowThreadProcessId(GetForegroundWindow(),&process);
  if(process!=GetCurrentProcessId()) {if(opened)closeBrowser();return;}
  bool pressed[256]{}; for(int k=0;k<256;++k) {bool down=(GetAsyncKeyState(k)&0x8000)!=0;pressed[k]=down&&!previousKeys[k];previousKeys[k]=down;}
- if(pressed[hotkey]) {if(opened) closeBrowser();else {logLine("Hotkey detected; opening browser.");config();if(!loading){scanPlugins();pluginIndex=-1;catalog={};filterItems();}opened=true;dirty=true;settingsPage=false;lastClickItem=-1;menuSound(1);cursorX=560;cursorY=350;mouseDX=0;mouseDY=0;wheelDelta=0;}return;}
+ bool queued=consumeToggle(GetTickCount());
+ if(queued||(!monitorActive&&pressed[hotkey])) {if(opened) closeBrowser();else {logLine("Hotkey detected; opening browser.");config();if(!loading){scanPlugins();pluginIndex=-1;catalog={};filterItems();}opened=true;dirty=true;settingsPage=false;lastClickItem=-1;menuSound(1);cursorX=560;cursorY=350;mouseDX=0;mouseDY=0;wheelDelta=0;}return;}
  if(!opened)return;
  if(pressed[VK_ESCAPE]) {if(settingsPage){settingsPage=false;dirty=true;}else closeBrowser();return;}
  cursorX=std::clamp(cursorX+mouseDX.exchange(0)*mouseSpeed,0.f,(float)Width-1); cursorY=std::clamp(cursorY+mouseDY.exchange(0)*mouseSpeed,0.f,(float)Height-1);
@@ -386,7 +406,13 @@ using StateFn=HRESULT (STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPVOID);
 using DataFn=HRESULT (STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPDIDEVICEOBJECTDATA,LPDWORD,DWORD);
 static StateFn originalState;
 static DataFn originalData;
-static bool blockInput() {return opened || (LONG)(blockUntil.load()-GetTickCount())>0;}
+static bool blockInput() {
+ DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+ if(pid!=GetCurrentProcessId())return false;
+ // Never hold game input indefinitely when a wrapper stops calling the renderer.
+ if(monitorActive&&GetTickCount()-lastFrameTick.load()>1500)return false;
+ return opened || (LONG)(blockUntil.load()-GetTickCount())>0;
+}
 static HRESULT STDMETHODCALLTYPE stateHook(IDirectInputDevice8W* dev,DWORD size,LPVOID data) {
  auto hr=originalState(dev,size,data); if(SUCCEEDED(hr)&&data&&blockInput()) {
   if(opened && (size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))) {auto m=(DIMOUSESTATE*)data;mouseDX+=m->lX;mouseDY+=m->lY;wheelDelta+=m->lZ;}
@@ -403,17 +429,48 @@ static bool replaceSlot(void** table,int slot,void* hook,void** original) {
 }
 using EndFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*);
 using ResetFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*);
-static EndFn originalEnd;static ResetFn originalReset;
+using PresentFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*,const RECT*,const RECT*,HWND,const RGNDATA*);
+using ResetExFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*);
+using PresentExFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD);
+struct RendererHooks {EndFn end=nullptr;ResetFn reset=nullptr;PresentFn present=nullptr;ResetExFn resetEx=nullptr;PresentExFn presentEx=nullptr;};
+static std::map<void**,RendererHooks> rendererHooks;
+static std::mutex rendererHookMutex;
+static RendererHooks hooksFor(IDirect3DDevice9* dev) {
+ std::lock_guard<std::mutex> guard(rendererHookMutex);auto i=rendererHooks.find(*(void***)dev);
+ return i==rendererHooks.end()?RendererHooks{}:i->second;
+}
+static IDirect3DDevice9* sceneDevice=nullptr;
 static void releaseTexture() {dirty=true;if(texture){texture->Release();texture=nullptr;}renderDevice=nullptr;}
-static HRESULT STDMETHODCALLTYPE resetHook(IDirect3DDevice9* dev,D3DPRESENT_PARAMETERS* p) {releaseTexture();return originalReset(dev,p);}
+static HRESULT STDMETHODCALLTYPE resetHook(IDirect3DDevice9* dev,D3DPRESENT_PARAMETERS* p) {
+ auto h=hooksFor(dev);{std::lock_guard<std::mutex> guard(catalogMutex);if(renderDevice==dev)releaseTexture();sceneDevice=nullptr;}
+ HRESULT hr=h.reset?h.reset(dev,p):D3DERR_INVALIDCALL;if(FAILED(hr))graphicsError("Reset",hr);else logLine("D3D9 Reset succeeded; menu texture will be recreated.");return hr;
+}
+static HRESULT STDMETHODCALLTYPE resetExHook(IDirect3DDevice9Ex* dev,D3DPRESENT_PARAMETERS* p,D3DDISPLAYMODEEX* mode) {
+ auto h=hooksFor(dev);{std::lock_guard<std::mutex> guard(catalogMutex);if(renderDevice==dev)releaseTexture();sceneDevice=nullptr;}
+ HRESULT hr=h.resetEx?h.resetEx(dev,p,mode):D3DERR_INVALIDCALL;if(FAILED(hr))graphicsError("ResetEx",hr);return hr;
+}
+static bool ensureTexture(IDirect3DDevice9* dev) {
+ if(texture)return true;
+ if((!canvas||!pixels||!font||!titleFont||!smallFont||!detailFont)&&!createCanvas())return false;
+ while(true) {
+  HRESULT hr=dev->CreateTexture(rasterWidth(),rasterHeight(),1,D3DUSAGE_DYNAMIC,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&texture,nullptr);
+  if(SUCCEEDED(hr))return true;
+  graphicsError("CreateTexture",hr);
+  if(hr==D3DERR_DEVICELOST||renderScale<=1)return false;
+  --renderScale;logLine("Retrying browser texture at a lower render scale (INI preference preserved).");
+  if(!createCanvas()){failNative("Fallback GDI canvas creation failed");return false;}
+  dirty=true;
+ }
+}
 struct Vertex {float x,y,z,rhw;DWORD color;float u,v;};
 static void draw(IDirect3DDevice9* dev) {
  if(!opened)return;
  if(renderDevice!=dev){releaseTexture();renderDevice=dev;}
- if(!texture && FAILED(dev->CreateTexture(rasterWidth(),rasterHeight(),1,D3DUSAGE_DYNAMIC,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&texture,nullptr))) {failNative("Could not create browser texture; menu closed to release input");closeBrowser();return;}
- if(dirty) {drawCanvas(); D3DLOCKED_RECT locked{}; if(FAILED(texture->LockRect(0,&locked,nullptr,D3DLOCK_DISCARD)))return;
+ if(!ensureTexture(dev)) {closeBrowser();return;}
+ if(dirty) {drawCanvas(); D3DLOCKED_RECT locked{}; HRESULT hr=texture->LockRect(0,&locked,nullptr,D3DLOCK_DISCARD);if(FAILED(hr)){graphicsError("LockRect",hr);closeBrowser();return;}
  for(int y=0;y<rasterHeight();++y)memcpy((char*)locked.pBits+y*locked.Pitch,(char*)pixels+y*rasterWidth()*4,rasterWidth()*4);texture->UnlockRect(0);dirty=false;}
- IDirect3DStateBlock9* block=nullptr;if(FAILED(dev->CreateStateBlock(D3DSBT_ALL,&block)))return;block->Capture();
+ IDirect3DStateBlock9* block=nullptr;HRESULT stateHR=dev->CreateStateBlock(D3DSBT_ALL,&block);if(FAILED(stateHR)){graphicsError("CreateStateBlock",stateHR);closeBrowser();return;}
+ stateHR=block->Capture();if(FAILED(stateHR)){graphicsError("Capture state",stateHR);block->Release();closeBrowser();return;}
  D3DVIEWPORT9 viewport{}; dev->GetViewport(&viewport); float scale=std::min(viewport.Width/(float)(Width+30),viewport.Height/(float)(Height+30));
  float x=viewport.X+(viewport.Width-Width*scale)/2.f-0.5f,y=viewport.Y+(viewport.Height-Height*scale)/2.f-0.5f,w=Width*scale,h=Height*scale;
  Vertex v[]={{x,y,0,1,0xFFFFFFFF,0,0},{x+w,y,0,1,0xFFFFFFFF,1,0},{x,y+h,0,1,0xFFFFFFFF,0,1},{x+w,y+h,0,1,0xFFFFFFFF,1,1}};
@@ -424,7 +481,10 @@ static void draw(IDirect3DDevice9* dev) {
  dev->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTexture(0,texture);dev->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);
  dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
-  dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex));
+ dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_MIPFILTER,D3DTEXF_NONE);
+ dev->SetRenderState(D3DRS_STENCILENABLE,FALSE);
+ HRESULT drawHR=dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex));
+ if(FAILED(drawHR)){graphicsError("DrawPrimitiveUP",drawHR);block->Apply();block->Release();closeBrowser();return;}
  // Pip-Boy-style solid amber arrow: independent geometry follows input every frame.
  dev->SetTexture(0,nullptr);dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_DIFFUSE);
  float cx=x+cursorX*scale,cy=y+cursorY*scale;
@@ -436,9 +496,33 @@ static HRESULT STDMETHODCALLTYPE endHook(IDirect3DDevice9* dev) {
  if(cp.hFocusWindow && IsWindowVisible(cp.hFocusWindow)) {
   if(!frameSeen.exchange(true)){nativeStatus(L"Frames",L"1");logLine("Game EndScene observed; renderer initialised.");}
   gameWindow=cp.hFocusWindow;
-  std::lock_guard<std::mutex> guard(catalogMutex);inputs();draw(dev);
+  lastFrameTick=GetTickCount();std::lock_guard<std::mutex> guard(catalogMutex);sceneDevice=dev;inputs();draw(dev);
  }
- return originalEnd(dev);
+ auto h=hooksFor(dev);return h.end?h.end(dev):D3DERR_INVALIDCALL;
+}
+static void renderForPresent(IDirect3DDevice9* dev) {
+ auto h=hooksFor(dev);
+ bool finishScene=false;
+ D3DDEVICE_CREATION_PARAMETERS cp{};dev->GetCreationParameters(&cp);
+ if(cp.hFocusWindow&&IsWindowVisible(cp.hFocusWindow)) {
+  lastFrameTick=GetTickCount();std::lock_guard<std::mutex> guard(catalogMutex);
+  if(sceneDevice!=dev) {
+   if(!frameSeen.exchange(true)){logLine("Present fallback observed; renderer initialised.");nativeStatus(L"Frames",L"1");}
+   gameWindow=cp.hFocusWindow;inputs();
+   if(opened){HRESULT hr=dev->BeginScene();if(SUCCEEDED(hr)){draw(dev);finishScene=true;}else {graphicsError("Present fallback BeginScene",hr);closeBrowser();}}
+  }
+  sceneDevice=nullptr;
+ }
+ if(finishScene&&h.end)h.end(dev);
+}
+static thread_local bool insidePresent=false;
+static HRESULT STDMETHODCALLTYPE presentHook(IDirect3DDevice9* dev,const RECT* src,const RECT* dst,HWND window,const RGNDATA* dirtyRegion) {
+ bool nested=insidePresent;insidePresent=true;if(!nested)renderForPresent(dev);auto h=hooksFor(dev);
+ HRESULT hr=h.present?h.present(dev,src,dst,window,dirtyRegion):D3DERR_INVALIDCALL;insidePresent=nested;return hr;
+}
+static HRESULT STDMETHODCALLTYPE presentExHook(IDirect3DDevice9Ex* dev,const RECT* src,const RECT* dst,HWND window,const RGNDATA* dirtyRegion,DWORD flags) {
+ bool nested=insidePresent;insidePresent=true;if(!nested)renderForPresent(dev);auto h=hooksFor(dev);
+ HRESULT hr=h.presentEx?h.presentEx(dev,src,dst,window,dirtyRegion,flags):D3DERR_INVALIDCALL;insidePresent=nested;return hr;
 }
 using CreateDeviceFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3D9*,UINT,D3DDEVTYPE,HWND,DWORD,D3DPRESENT_PARAMETERS*,IDirect3DDevice9**);
 using CreateDeviceExFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3D9Ex*,UINT,D3DDEVTYPE,HWND,DWORD,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*,IDirect3DDevice9Ex**);
@@ -450,16 +534,22 @@ static CreateDeviceExFn originalCreateDeviceEx;
 static FactoryFn originalFactory;
 static FactoryExFn originalFactoryEx;
 static GetProcFn originalGetProc;
-static void attachRenderer(IDirect3DDevice9* device) {
+static void attachRenderer(IDirect3DDevice9* device,bool extended=false) {
  if(!device)return;auto table=*(void***)device;
- if(!replaceSlot(table,16,(void*)resetHook,(void**)&originalReset)||!replaceSlot(table,42,(void*)endHook,(void**)&originalEnd)) {failNative("Could not attach game renderer hooks");return;}
+ std::lock_guard<std::mutex> guard(rendererHookMutex);
+ auto existing=rendererHooks.find(table);if(existing!=rendererHooks.end())return;
+ auto& h=rendererHooks[table];
+ if(!replaceSlot(table,16,(void*)resetHook,(void**)&h.reset)||!replaceSlot(table,42,(void*)endHook,(void**)&h.end)) {failNative("Could not attach game renderer hooks");return;}
+ if(table[17]&&!replaceSlot(table,17,(void*)presentHook,(void**)&h.present))failNative("Could not attach Present fallback");
+ if(extended&&table[132]&&!replaceSlot(table,132,(void*)resetExHook,(void**)&h.resetEx))failNative("Could not attach ResetEx hook");
+ if(extended&&table[121]&&!replaceSlot(table,121,(void*)presentExHook,(void**)&h.presentEx))failNative("Could not attach PresentEx fallback");
  nativeStatus(L"Hooks",L"1");logLine("Captured the game's D3D9 device; EndScene and Reset hooks attached.");
 }
 static HRESULT STDMETHODCALLTYPE createDeviceHook(IDirect3D9* self,UINT adapter,D3DDEVTYPE type,HWND window,DWORD flags,D3DPRESENT_PARAMETERS* pp,IDirect3DDevice9** device) {
  auto hr=originalCreateDevice(self,adapter,type,window,flags,pp,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device);return hr;
 }
 static HRESULT STDMETHODCALLTYPE createDeviceExHook(IDirect3D9Ex* self,UINT adapter,D3DDEVTYPE type,HWND window,DWORD flags,D3DPRESENT_PARAMETERS* pp,D3DDISPLAYMODEEX* mode,IDirect3DDevice9Ex** device) {
- auto hr=originalCreateDeviceEx(self,adapter,type,window,flags,pp,mode,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device);return hr;
+ auto hr=originalCreateDeviceEx(self,adapter,type,window,flags,pp,mode,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device,true);return hr;
 }
 static IDirect3D9* WINAPI factoryHook(UINT version) {
  auto d3d=originalFactory(version);if(d3d)replaceSlot(*(void***)d3d,16,(void*)createDeviceHook,(void**)&originalCreateDevice);return d3d;
@@ -490,6 +580,21 @@ static HRESULT WINAPI inputFactoryHook(HINSTANCE instance,DWORD version,REFIID i
  auto hr=originalInputFactory(instance,version,iid,out,outer);
  if(SUCCEEDED(hr)&&out&&*out)replaceSlot(*(void***)*out,3,(void*)inputDeviceHook,(void**)&originalInputDevice);return hr;
 }
+static DWORD WINAPI hotkeyMonitor(void*) {
+ bool wasDown=false;UINT key=VK_F11;DWORD poll=0;
+ for(;;) {
+  DWORD now=GetTickCount();
+  if(now-poll>=1000){poll=now;double old=setting(L"Controls",L"Hotkey",VK_F11,VK_F1,VK_F24);key=VK_F1-1+(UINT)setting(L"Controls",L"FunctionKey",old-VK_F1+1,1,24);}
+  DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+  bool down=(GetAsyncKeyState(key)&0x8000)!=0;
+  if(pid==GetCurrentProcessId()&&down&&!wasDown) {
+   logLine("Hotkey monitor detected key press.");
+   if(!lastFrameTick||now-lastFrameTick.load()>1500)failNative("Hotkey received but renderer is not delivering frames. Check graphics wrappers and plugin conflicts.");
+   else {toggleTick=now;toggleQueued=true;}
+  }
+  wasDown=down;Sleep(16);
+ }
+}
 static DWORD WINAPI initialize(void*) {
  wchar_t exe[MAX_PATH];GetModuleFileNameW(nullptr,exe,MAX_PATH);root=exe;root=root.substr(0,root.find_last_of(L"\\/")+1);
  iniPath=root+L"Data\\NVSE\\Plugins\\LukesItemBrowser.ini"; config();
@@ -499,25 +604,40 @@ static DWORD WINAPI initialize(void*) {
  WritePrivateProfileStringW(L"Bridge",L"Ready",L"0",bridgePath.c_str());WritePrivateProfileStringW(L"Request",L"Pending",L"0",bridgePath.c_str());
  WritePrivateProfileStringW(L"Audio",L"Menu",L"0",bridgePath.c_str());nativeStatus(L"Frames",L"0");nativeStatus(L"Input",L"0");nativeStatus(L"Hooks",L"0");nativeStatus(L"Error",L"");config();
  auto z=LoadLibraryExW((root+L"Data\\NVSE\\Plugins\\LukesItemBrowser\\zlib1.dll").c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);if(z)inflateFn=(ib::Inflate)GetProcAddress(z,"uncompress");
- logLine("Luke's Item Browser 1.0: NVSEPlugin_Load entered; installing game factory hooks.");
+ logLine("Luke's Item Browser 1.0.1: NVSEPlugin_Load entered; installing game factory hooks.");
  if(!inflateFn)failNative("zlib1.dll could not be loaded; compressed item records unavailable");
  renderScale=(int)setting(L"Display",L"RenderScale",2,1,3);
- if(!createCanvas()){failNative("GDI canvas creation failed");return 1;}
+ while(!createCanvas()){if(renderScale<=1){failNative("GDI canvas creation failed");destroyCanvas();return 1;}--renderScale;}
  auto exeModule=GetModuleHandleW(nullptr);
  bool imports=hookImport(exeModule,"GetProcAddress",(void*)getProcHook,(void**)&originalGetProc);
  // Also support hosts that import the factory directly.
  bool direct=hookImport(exeModule,"Direct3DCreate9",(void*)factoryHook,(void**)&originalFactory);
+ bool directEx=hookImport(exeModule,"Direct3DCreate9Ex",(void*)factoryExHook,(void**)&originalFactoryEx);
  bool input=hookImport(exeModule,"DirectInput8Create",(void*)inputFactoryHook,(void**)&originalInputFactory);
- if(!imports&&!direct){failNative("Game D3D factory import not found");return 1;}
+ if(!imports&&!direct&&!directEx){failNative("Game D3D factory import not found");return 1;}
  if(!input)failNative("Game DirectInput8Create import not found");
  logLine("Factory hooks installed; waiting for the game's renderer and input devices.");
  return 0;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEVersionPrefix* nvse,PluginInfo* info) {
- info->infoVersion=1;info->name="Luke's Item Browser";info->version=100;
- return nvse&&!nvse->isEditor&&nvse->runtimeVersion==0x040020D0&&nvse->nvseVersion>=6;
+ info->infoVersion=1;info->name="Luke's Item Browser";info->version=101;
+ wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);root=exe;root=root.substr(0,root.find_last_of(L"\\/")+1);
+ if(!nvse){logLine("Query rejected: missing NVSE interface.");return false;}
+ if(nvse->isEditor){logLine("Query rejected: this plugin runs in the game, not GECK.");return false;}
+ if(nvse->runtimeVersion!=0x040020D0){logLine("Query rejected: unsupported game runtime (requires standard 1.4.0.525).");return false;}
+ if(nvse->nvseVersion<6){logLine("Query rejected: xNVSE 6 or newer required.");return false;}
+ logLine("Luke's Item Browser 1.0.1: runtime query accepted.");return true;
 }
-extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const void*) {return initialize(nullptr)==0;}
+extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const void*) {
+ if(initialize(nullptr)!=0)return false;
+ // Runtime DLL remains loaded while its monitor and installed hooks are active.
+ HMODULE pinned=nullptr;
+ if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,(LPCWSTR)&hotkeyMonitor,&pinned)) {
+  monitorActive=true;HANDLE thread=CreateThread(nullptr,0,hotkeyMonitor,nullptr,0,nullptr);
+  if(thread)CloseHandle(thread);else {monitorActive=false;failNative("Hotkey monitor could not start; using render-thread input fallback");}
+ }else failNative("Could not pin plugin; using render-thread input fallback");
+ return true;
+}
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH){moduleHandle=instance;DisableThreadLibraryCalls(instance);}return TRUE;}
 
 
