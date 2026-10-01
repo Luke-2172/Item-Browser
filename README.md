@@ -1,5 +1,7 @@
 # Luke's Item Browser 1.0
 
+Coded with GPT-6 Astra
+
 An ESP-free Fallout: New Vegas item browser with plugin, item and detail columns,
 category filters, separate item/plugin searches and inventory addition through JIP LN.
 F11 opens the browser by default. Open/close cues are `ui_vats_move` / `ui_vats_ready`.
