@@ -7,7 +7,7 @@ foreach ($file in @('NVSE/Plugins/LukesItemBrowser.dll','NVSE/Plugins/LukesItemB
 $out = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Force $out | Out-Null
 Add-Type -AssemblyName System.IO.Compression
-$path = Join-Path $out 'Lukes-Item-Browser-FNV-1.0.zip'
+$path = Join-Path $out 'Lukes-Item-Browser-FNV-1.0.1.zip'
 $stream = [IO.File]::Open($path,[IO.FileMode]::Create)
 $zip = [IO.Compression.ZipArchive]::new($stream,[IO.Compression.ZipArchiveMode]::Create)
 try {

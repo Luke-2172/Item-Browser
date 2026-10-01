@@ -1,0 +1,48 @@
+Luke's Item Browser 1.0.1 - compatibility and troubleshooting
+
+INSTALLATION
+Install the compiled mod ZIP, not the source ZIP. The archive's NVSE and MCM
+folders belong under the game's Data folder. Launch the intended MO2 profile
+with xNVSE active. The browser remains ESP-free and needs no extra framework.
+Do not enable multiple versions at once. Old MCM identity ESPs are unnecessary.
+
+WHAT CHANGED
+This version intercepts the executable's directly imported Direct3DCreate9Ex.
+Captured devices get EndScene plus Present hooks, and captured Ex devices also
+get PresentEx and ResetEx hooks. Present is used only if EndScene was not observed
+since the previous presentation. Rendering still runs on the calling render thread.
+A separate Windows-only monitor detects the configured function key, logs it,
+and queues a short-lived request for the render thread. It never invokes game
+scripting or Direct3D functions. The plugin remains loaded for the process lifetime.
+
+If texture creation fails, the browser retries at lower render scales, down to 1.
+The selected INI preference is preserved; restart to retry the preferred resolution.
+Failure to create, lock or draw the texture closes the browser to release input.
+Focus loss or missing rendering callbacks also stops input suppression.
+
+COLLECT THESE FILES
+Data/NVSE/Plugins/LukesItemBrowser.log
+Data/config/LukesItemBrowserRuntime.ini
+nvse.log
+MO2 may place generated files in Overwrite.
+
+The browser log appends across launches. Find the most recent 1.0.1 startup.
+- No new startup: check NVSE loading, correct profile, archive layout and DLL.
+- Query rejected: the log explains the unsupported runtime/editor/version.
+- Factory hooks installed, but no captured device: renderer capture was bypassed.
+- Device captured, but no EndScene/Present: that device is not reaching our hooks.
+- Hotkey monitor detected key press, but renderer warning: key arrived, drawing did not.
+- Hotkey detected; opening browser, then HRESULT error: send the exact error line.
+
+Include game edition, Windows version, graphics card, fullscreen/windowed mode,
+and whether DXVK, ENB, ReShade or other overlays are installed. Check a separate
+test profile without graphics wrappers if practical; retain your normal setup.
+Never download replacement system DLLs from random DLL websites.
+
+LIMITS
+Native Windows D3D9 is the intended baseline. Graphics wrappers and Wine/Proton
+remain unverified. The fallback still needs to capture a device through one of
+the intercepted executable factory paths. It does not search arbitrary game memory
+for an existing device or override another mod's hooks after installation.
+Unsupported game editions and incorrect xNVSE installations still require fixing.
+Standalone mock tests cannot prove real GPU, wrapper or in-game compatibility.

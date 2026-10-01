@@ -1,4 +1,4 @@
-Luke's Item Browser 1.0 - scoped security and robustness review
+Luke's Item Browser 1.0.1 - scoped security and robustness review
 Reviewed 1 October 2026
 
 This is a source review and targeted testing, not an independent security audit
@@ -64,3 +64,13 @@ Installed MCM Extender 1.63 scripts and author JSON documentation, read only.
 https://github.com/Stentorious/MCMExtender/wiki/JSON-Structure-Guide
 https://www.nexusmods.com/newvegas/mods/42507
 https://geckwiki.com/index.php/Form_Type_IDs
+
+1.0.1 ADDENDUM
+Renderer fallback and allocation failure paths received targeted mock tests.
+Graphics callbacks preserve separate original functions per captured device table.
+The hotkey worker calls Windows input/file APIs only and hands off via atomics;
+Direct3D and game scripting are not called from that worker. DLL pinning prevents
+unloading active hook/worker code. Queued requests expire after two seconds.
+Input suppression checks foreground ownership and renderer heartbeat.
+Actual GPU/device reset, wrapper combinations and in-game MCM remain untested.
+This update does not certify the mod free of bugs or vulnerabilities.

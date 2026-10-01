@@ -5,11 +5,24 @@ static void* fakeDeviceTable[134]{};
 struct FakeCOM {void** table;};
 static FakeCOM fakeD3D{fakeD3DTable},fakeDevice{fakeDeviceTable};
 static int endCalls=0,resetCalls=0;
+static bool visibleParameters=false;
 static HRESULT STDMETHODCALLTYPE fakeEnd(IDirect3DDevice9*) {++endCalls;return S_OK;}
 static HRESULT STDMETHODCALLTYPE fakeReset(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*) {++resetCalls;return S_OK;}
-static HRESULT STDMETHODCALLTYPE fakeParameters(IDirect3DDevice9*,D3DDEVICE_CREATION_PARAMETERS* cp) {*cp={};return S_OK;}
+static HRESULT STDMETHODCALLTYPE fakeParameters(IDirect3DDevice9*,D3DDEVICE_CREATION_PARAMETERS* cp) {*cp={};if(visibleParameters)cp->hFocusWindow=GetDesktopWindow();return S_OK;}
 static HRESULT STDMETHODCALLTYPE fakeCreate(IDirect3D9*,UINT,D3DDEVTYPE,HWND,DWORD,D3DPRESENT_PARAMETERS*,IDirect3DDevice9** out) {*out=(IDirect3DDevice9*)&fakeDevice;return S_OK;}
 static IDirect3D9* WINAPI fakeFactory(UINT) {return (IDirect3D9*)&fakeD3D;}
+static int presentCalls=0,presentExCalls=0,resetExCalls=0,textureCalls=0;
+static HRESULT STDMETHODCALLTYPE fakePresent(IDirect3DDevice9*,const RECT*,const RECT*,HWND,const RGNDATA*){++presentCalls;return S_OK;}
+static HRESULT STDMETHODCALLTYPE fakePresentEx(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD){++presentExCalls;return S_OK;}
+static HRESULT STDMETHODCALLTYPE fakeResetEx(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*){++resetExCalls;return S_OK;}
+static ULONG STDMETHODCALLTYPE fakeRelease(void*){return 1;}
+static void* fakeTextureTable[22]{};
+static FakeCOM fakeTexture{fakeTextureTable};
+static bool rejectEveryTexture=false;
+static HRESULT STDMETHODCALLTYPE fakeTextureCreate(IDirect3DDevice9*,UINT width,UINT,UINT,DWORD,D3DFORMAT,D3DPOOL,IDirect3DTexture9** out,HANDLE*) {
+ ++textureCalls;*out=nullptr;if(rejectEveryTexture||width>1120)return D3DERR_OUTOFVIDEOMEMORY;
+ *out=(IDirect3DTexture9*)&fakeTexture;return S_OK;
+}
 int main() {
  moduleHandle=GetModuleHandleW(nullptr);
  if(initialize(nullptr)!=0){std::cerr<<"Initialise failed\n";return 1;}
@@ -25,6 +38,23 @@ int main() {
  // Recapturing a shared vtable must not replace an original with our own hook.
  attachRenderer(device);device->EndScene();
  if(endCalls!=2||resetCalls!=1)return 5;
+ void* exTable[134]{};FakeCOM exDevice{exTable};
+ exTable[9]=(void*)fakeParameters;exTable[16]=(void*)fakeReset;exTable[17]=(void*)fakePresent;
+ exTable[42]=(void*)fakeEnd;exTable[121]=(void*)fakePresentEx;exTable[132]=(void*)fakeResetEx;
+ auto ex=(IDirect3DDevice9Ex*)&exDevice;attachRenderer(ex,true);
+ ex->Present(nullptr,nullptr,nullptr,nullptr);ex->PresentEx(nullptr,nullptr,nullptr,nullptr,0);ex->ResetEx(&pp,nullptr);
+ if(presentCalls!=1||presentExCalls!=1||resetExCalls!=1)return 40;
+ visibleParameters=true;frameSeen=false;sceneDevice=nullptr;ex->Present(nullptr,nullptr,nullptr,nullptr);visibleParameters=false;
+ if(!frameSeen||!lastFrameTick)return 45;
+ toggleTick=100;toggleQueued=true;if(!consumeToggle(150)||consumeToggle(151))return 46;
+ toggleQueued=true;if(consumeToggle(2100))return 47;
+ device->EndScene();if(endCalls!=3)return 41;
+ fakeTextureTable[2]=(void*)fakeRelease;exTable[23]=(void*)fakeTextureCreate;
+ renderScale=3;if(!createCanvas()||!ensureTexture(ex)||renderScale!=1||textureCalls!=3)return 42;
+ releaseTexture();rejectEveryTexture=true;textureCalls=0;
+ if(ensureTexture(ex)||textureCalls!=1)return 43;
+ rejectEveryTexture=false;renderScale=2;if(!createCanvas())return 44;
+ std::cout<<"PASS: separate device chains, Present/PresentEx/ResetEx, texture downsizing and terminal allocation failure\n";
  std::cout<<"PASS: game factory -> CreateDevice -> EndScene/Reset chain, including duplicate capture\n";
  IDirectInput8W* di=nullptr;IDirectInputDevice8W* mouse=nullptr;IDirectInputDevice8W* keyboard=nullptr;
  if(FAILED(DirectInput8Create(moduleHandle,0x800,IID_IDirectInput8W,(void**)&di,nullptr)))return 6;
