@@ -1,0 +1,19 @@
+int iIndex
+int iCount
+string_var sKey
+string_var sName
+begin Function {}
+    let iCount := GetNumLoadedMods
+    let iIndex := 0
+    while iIndex < iCount
+        let sKey := sv_Construct "Loaded:%g" iIndex
+        let sName := GetNthModName iIndex
+        SetINIString (sKey) (sName) "LukesItemBrowserRuntime.ini"
+        let iIndex += 1
+    loop
+    SetINIFloat "Bridge:Count" iCount "LukesItemBrowserRuntime.ini"
+    Print "[Luke's Item Browser] Active plugin list published."
+    sv_Destruct sKey sName
+end
+
+

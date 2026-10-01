@@ -1,0 +1,52 @@
+ref rSound
+ref rItem
+int iEvent
+string_var sPlugin
+string_var sForm
+begin Function {}
+    let iEvent := GetINIFloat "Audio:Menu" "LukesItemBrowserRuntime.ini"
+    if iEvent > 0
+        SetINIFloat "Audio:Menu" 0 "LukesItemBrowserRuntime.ini"
+        let rSound := 0
+        if iEvent == 1
+            let rSound := GetFormFromMod "FalloutNV.esm" "015633"
+        elseif iEvent == 2
+            let rSound := GetFormFromMod "FalloutNV.esm" "015632"
+        endif
+        if rSound
+            PlaySound rSound 1
+        endif
+    endif
+    if (GetINIFloat "Audio:Pickup" "LukesItemBrowserRuntime.ini") == 1
+        SetINIFloat "Audio:Pickup" 0 "LukesItemBrowserRuntime.ini"
+        if (GetINIFloat "Native:PickupSounds" "LukesItemBrowserRuntime.ini") == 1
+            let sPlugin := GetINIString "Audio:Plugin" "LukesItemBrowserRuntime.ini"
+            let sForm := GetINIString "Audio:Form" "LukesItemBrowserRuntime.ini"
+            let rItem := GetFormFromMod (sPlugin) (sForm)
+            if rItem
+                let rSound := GetPickupSound rItem
+                if (GetType rItem) == 40
+                    let rSound := GetWeaponSound rItem 12
+                    if rSound == 0
+                        let rSound := GetFormFromMod "FalloutNV.esm" "01D561"
+                    endif
+                elseif (GetType rItem) == 24 && rSound == 0
+                    let rSound := GetFormFromMod "FalloutNV.esm" "01954D"
+                endif
+                if rSound == 0
+                    let rSound := GetFormFromMod "FalloutNV.esm" "0194E5"
+                endif
+                if rSound
+                    PlaySound rSound 1
+                endif
+            endif
+        endif
+    endif
+    sv_Destruct sPlugin sForm
+end
+
+
+
+
+
+

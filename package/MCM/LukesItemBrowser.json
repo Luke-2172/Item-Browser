@@ -1,0 +1,144 @@
+{
+  "modName": "LukesItemBrowser",
+  "displayName": "Luke's Item Browser",
+  "saveFile": "..\\NVSE\\Plugins\\LukesItemBrowser.ini",
+  "minMCMVersion": 1.63,
+  "requirements": [
+    {
+      "file": "NVSE/Plugins/LukesItemBrowser.dll",
+      "type": "file"
+    }
+  ],
+  "submenus": {
+    "0": {
+      "columns": 1,
+      "listTitle": "Settings",
+      "pageTitle": "Luke's Item Browser 1.0",
+      "enable": 1,
+      "options": {
+        "1": {
+          "type": 2,
+          "title": "Open / close key",
+          "enable": 1,
+          "mouse": "Select a function key from F1 to F24. Avoid keys used by other mods.",
+          "vars": [
+            {
+              "configINI": "Controls:FunctionKey",
+              "default": 11
+            }
+          ],
+          "scale": {
+            "valueMin": 1,
+            "valueMax": 24,
+            "valueIncrement": 1,
+            "valueDecimal": 0
+          },
+          "prefix": "F"
+        },
+        "2": {
+          "type": 2.5,
+          "title": "Mouse speed",
+          "enable": 1,
+          "mouse": "Cursor sensitivity inside the item browser.",
+          "vars": [
+            {
+              "configINI": "Controls:MouseSpeed",
+              "default": 1.6
+            }
+          ],
+          "scale": {
+            "valueMin": 0.25,
+            "valueMax": 5,
+            "valueIncrement": 0.05,
+            "valueDecimal": 2,
+            "suffix": "x"
+          },
+          "suffix": "x"
+        },
+        "3": {
+          "type": 2,
+          "title": "Background opacity",
+          "enable": 1,
+          "mouse": "Background strength. Text and borders remain bright.",
+          "vars": [
+            {
+              "configINI": "Display:BackgroundOpacity",
+              "default": 72
+            }
+          ],
+          "scale": {
+            "valueMin": 20,
+            "valueMax": 100,
+            "valueIncrement": 1,
+            "valueDecimal": 0,
+            "suffix": "%"
+          },
+          "suffix": "%"
+        },
+        "4": {
+          "type": 5,
+          "title": "Menu sounds",
+          "enable": 1,
+          "mouse": "Open: ui_vats_move. Close: ui_vats_ready.",
+          "vars": [
+            {
+              "configINI": "Audio:MenuSounds",
+              "default": 1
+            }
+          ]
+        },
+        "5": {
+          "type": 5,
+          "title": "Pickup sounds",
+          "enable": 1,
+          "mouse": "Play an item pickup sound after a successful addition.",
+          "vars": [
+            {
+              "configINI": "Audio:PickupSounds",
+              "default": 1
+            }
+          ]
+        },
+        "6": {
+          "type": 5,
+          "title": "Include overrides",
+          "enable": 1,
+          "mouse": "Also list inventory records overridden by the selected plugin.",
+          "vars": [
+            {
+              "configINI": "Browser:ShowOverrides",
+              "default": 0
+            }
+          ]
+        },
+        "7": {
+          "type": 2,
+          "title": "Text resolution",
+          "enable": 1,
+          "mouse": "Restart New Vegas after changing this setting. 1 = standard, 2 = high, 3 = highest.",
+          "vars": [
+            {
+              "configINI": "Display:RenderScale",
+              "default": 2
+            }
+          ],
+          "scale": {
+            "valueMin": 1,
+            "valueMax": 3,
+            "valueIncrement": 1,
+            "valueDecimal": 0,
+            "suffix": "x"
+          },
+          "suffix": "x"
+        },
+        "8": {
+          "type": 7,
+          "title": "Apply changes",
+          "enable": 1,
+          "string": "Return to gameplay",
+          "mouse": "Settings apply after closing the pause menu. Text resolution requires a restart."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+Luke's Item Browser 1.0 - scoped security and robustness review
+Reviewed 1 October 2026
+
+This is a source review and targeted testing, not an independent security audit
+or a guarantee that the mod has no vulnerabilities.
+
+CHANGES MADE
+1. Validate plugin basenames from the runtime INI and master records. Reject
+   separators, drive/stream syntax, control characters, traversal and INI syntax.
+   Selected plugins are opened only under the game's Data directory. Windows
+   junctions and MO2's virtual file mapping are not a filesystem security boundary.
+2. Bound record size/decompression to 16 MiB, total decoded data to 256 MiB,
+   records visited to 2 million, items to 100,000, names to 4096 bytes and masters
+   to 254. Existing record/subrecord/group bounds and nesting checks remain.
+3. Check item and master indexes before lookup. Limit requested quantity to 1-100
+   in native code and scripts. Reject stale-session requests, non-inventory
+   forms and armor-addon forms before calling player.AddItem.
+4. Reject invalid/non-finite configuration numbers and clamp valid numeric input.
+   Correctly accept JIP's decimal/scientific notation for MCM settings.
+5. Load the bundled compression DLL by an absolute path with dependency lookup
+   restricted to its directory and Windows System32. No current-directory lookup.
+6. Compile the main native DLL with stack-cookie checks, ASLR and DEP.
+   Control Flow Guard was evaluated but not retained: it terminated the legacy
+   hook harness. The passing release uses the other listed mitigations.
+7. ESP-free MCM JSON writes seven fixed settings keys through a fixed INI path.
+   It has no script callbacks, console commands or user-supplied file paths.
+   Native settings validation applies equally to INI and MCM changes.
+
+TESTS COMPLETED
+- Compiled x86 DLL and checked PE ASLR/DEP flags.
+- Existing standalone hook/callback/input and request-serialization tests passed.
+- Scientific settings, NaN rejection, numeric clamping and invalid names passed.
+- Malformed inputs rejected: traversal master, INI-syntax master, excessive
+  decompression size, excessive string size, too many masters, dangling XXXX.
+- Existing compressed-record, override, deleted-record and truncated-file tests.
+- Optional MCM JSON settings, defaults, ranges and fixed destination checked.
+- Script structure, quote balance, line lengths and CompileScript targets checked.
+- Browser/settings formatting inspected using the production menu drawing code.
+
+SOURCE REVIEW OBSERVATIONS
+No network, shell execution, download/updater, or credential-reading routines were
+found in the owned source. File writes are the fixed preferences/runtime/log paths.
+The mod intentionally reads plugin files and captures keyboard/mouse input while
+the browser is open. It intentionally hooks Direct3D9 and DirectInput APIs.
+
+LIMITATIONS
+The optional MCM JSON has not been playtested. Request-validation scripts have
+not been compiled by the running
+game or playtested here. Static script checks cannot establish GECK correctness.
+Actual GPU rendering, wrapper compatibility, device reset, inventory behavior and
+MCM UI behavior remain in-game validation tasks. Standalone hook tests use mock
+COM objects for rendering and do not validate those paths.
+
+The game loads arbitrary native DLLs and mod scripts. This plugin cannot protect
+against a malicious mod, a replaced DLL, or another process running with the
+user's permissions. Session tokens prevent stale requests; they are not secrets
+or an authentication boundary. Adding a scripted item may run its existing game
+scripts. Third-party dependencies and Bethesda engine internals were not audited.
+No exhaustive fuzzing, penetration test or third-party vulnerability certification
+was performed. Resource limits may reject exceptionally large legitimate plugins.
+
+REFERENCES USED
+Installed MCM Extender 1.63 scripts and author JSON documentation, read only.
+https://github.com/Stentorious/MCMExtender/wiki/JSON-Structure-Guide
+https://www.nexusmods.com/newvegas/mods/42507
+https://geckwiki.com/index.php/Form_Type_IDs

@@ -1,0 +1,14 @@
+Luke's Item Browser 1.0 - ESP-free MCM release
+
+- Optional MCM settings now use MCM Extender 1.63+ and a JSON menu definition.
+- No browser ESP, dummy form, MCM registration callback or extra load-order slot.
+- Seven preferences share the native browser's INI.
+- FunctionKey=11 selects F11 directly; F1-F24 supported.
+- Old Hotkey values remain readable when FunctionKey is absent.
+- Formatting improvements, VATS move/ready sounds and parser hardening retained.
+- Separate source archive includes build, tests, packaging and runtime assets.
+
+Replace the previous installation instead of merging. Disable/remove its
+LukesItemBrowserMCM.esp. Install MCM and MCM Extender separately only if wanted.
+MCM changes apply after returning from the pause menu; text resolution needs restart.
+See README.txt and SECURITY-REVIEW.txt for dependencies, tests and limitations.

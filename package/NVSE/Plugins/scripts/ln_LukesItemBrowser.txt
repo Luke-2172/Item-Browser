@@ -1,0 +1,33 @@
+; Luke's Item Browser 1.0. Requires xNVSE 6.3.5+ and JIP LN 56.95+.
+; Keep this runner short: inline expressions have a 512-character limit.
+Print "[Luke's Item Browser] Starting script bridge 1.0..."
+ref rLukeInit
+ref rLukeTick
+ref rLukeList
+let rLukeInit := CompileScript "LukesItemBrowser/Initialise.gek"
+let rLukeTick := CompileScript "LukesItemBrowser/Tick.gek"
+if rLukeInit && rLukeTick
+    Call rLukeInit
+    SetGameMainLoopCallback rLukeTick 1 1 11
+    Print "[Luke's Item Browser] Script bridge initialised. Checking native renderer."
+    let rLukeList := CompileScript "LukesItemBrowser/ListPlugins.gek"
+    if rLukeList
+        Call rLukeList
+    else
+        Print "[Luke's Item Browser] Plugin list unavailable. Installed-file browsing remains available."
+    endif
+else
+    Print "[Luke's Item Browser] ERROR: bridge functions failed to compile. Check nvse.log."
+endif
+
+; Optional MCM registration is handled by MCM Extender via Data\MCM JSON.
+
+ref rLukeAudio
+let rLukeAudio := CompileScript "LukesItemBrowser/Audio.gek"
+if rLukeAudio
+    SetGameMainLoopCallback rLukeAudio 1 1 11
+else
+    Print "[Luke's Item Browser] Audio unavailable. Item browser remains usable."
+endif
+
+

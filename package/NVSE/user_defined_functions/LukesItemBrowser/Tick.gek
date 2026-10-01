@@ -1,0 +1,87 @@
+string_var sPlugin
+string_var sForm
+string_var sError
+string_var sHotkey
+ref rItem
+int iQuantity
+int iBefore
+int iTicks
+int iReported
+int iType
+float fSession
+begin Function {}
+    let iReported := GetINIFloat "Diagnostic:Reported" "LukesItemBrowserRuntime.ini"
+    if iReported != 1
+        if (GetINIFloat "Native:Frames" "LukesItemBrowserRuntime.ini") == 1 && (GetINIFloat "Native:Input" "LukesItemBrowserRuntime.ini") == 1
+            let sHotkey := GetINIString "Native:Hotkey" "LukesItemBrowserRuntime.ini"
+            Print "[Luke's Item Browser] initialised - renderer, input and script bridge ready."
+            Print "[Luke's Item Browser] Open menu with " + sHotkey
+            SetINIFloat "Diagnostic:Reported" 1 "LukesItemBrowserRuntime.ini"
+        elseif iReported == 0
+            let iTicks := GetINIFloat "Diagnostic:Ticks" "LukesItemBrowserRuntime.ini"
+            let iTicks += 1
+            SetINIFloat "Diagnostic:Ticks" iTicks "LukesItemBrowserRuntime.ini"
+            if iTicks >= 20
+                Print "[Luke's Item Browser] WARNING: renderer/input not ready. See LukesItemBrowser.log and runtime INI."
+                let sError := GetINIString "Native:Error" "LukesItemBrowserRuntime.ini"
+                Print "[Luke's Item Browser] Native status: " + sError
+                SetINIFloat "Diagnostic:Reported" 2 "LukesItemBrowserRuntime.ini"
+            endif
+        endif
+    endif
+    if MenuMode
+        sv_Destruct sError sHotkey
+        return
+    endif
+    if (GetINIFloat "Request:Pending" "LukesItemBrowserRuntime.ini") == 1
+        SetINIFloat "Request:Pending" 0 "LukesItemBrowserRuntime.ini"
+        let fSession := GetINIFloat "Bridge:Session" "LukesItemBrowserRuntime.ini"
+        if fSession <= 0 || (GetINIFloat "Request:Session" "LukesItemBrowserRuntime.ini") != fSession
+            SetINIString "Request:Result" "Stale item request rejected." "LukesItemBrowserRuntime.ini"
+            sv_Destruct sPlugin sForm sError sHotkey
+            return
+        endif
+        let sPlugin := GetINIString "Request:Plugin" "LukesItemBrowserRuntime.ini"
+        let sForm := GetINIString "Request:Form" "LukesItemBrowserRuntime.ini"
+        let iQuantity := GetINIFloat "Request:Count" "LukesItemBrowserRuntime.ini"
+        if iQuantity < 1
+            let iQuantity := 1
+        elseif iQuantity > 100
+            let iQuantity := 100
+        endif
+        if IsModLoaded (sPlugin)
+            let rItem := GetFormFromMod (sPlugin) (sForm)
+            if rItem
+                let iType := GetType rItem
+                if iType != 24 && iType != 25 && iType != 31 && iType != 40 && iType != 41 && iType != 46 && iType != 47 && iType != 49 && iType != 103
+                    SetINIString "Request:Result" "Non-inventory form rejected." "LukesItemBrowserRuntime.ini"
+                    sv_Destruct sPlugin sForm sError sHotkey
+                    return
+                endif
+                if iType == 24 && (IsArmorAddon rItem)
+                    SetINIString "Request:Result" "Armor-addon record rejected." "LukesItemBrowserRuntime.ini"
+                    sv_Destruct sPlugin sForm sError sHotkey
+                    return
+                endif
+                let iBefore := player.GetItemCount rItem
+                player.AddItem rItem iQuantity 1
+                if (player.GetItemCount rItem) > iBefore
+                    SetINIString "Request:Result" "Item added to inventory." "LukesItemBrowserRuntime.ini"
+                    SetINIString "Audio:Plugin" (sPlugin) "LukesItemBrowserRuntime.ini"
+                    SetINIString "Audio:Form" (sForm) "LukesItemBrowserRuntime.ini"
+                    SetINIFloat "Audio:Pickup" 1 "LukesItemBrowserRuntime.ini"
+                else
+                    SetINIString "Request:Result" "Game did not add this item." "LukesItemBrowserRuntime.ini"
+                endif
+            else
+                SetINIString "Request:Result" "Item form could not be resolved in the current game." "LukesItemBrowserRuntime.ini"
+            endif
+        else
+            SetINIString "Request:Result" "The source plugin is not active." "LukesItemBrowserRuntime.ini"
+        endif
+    endif
+    sv_Destruct sPlugin sForm sError sHotkey
+end
+
+
+

@@ -1,0 +1,20 @@
+float fSession
+begin Function {}
+    SetINIFloat "Audio:Pickup" 0 "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Bridge:Ready" 0 "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Request:Pending" 0 "LukesItemBrowserRuntime.ini"
+    SetINIString "Request:Result" "Bridge ready." "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Diagnostic:Reported" 0 "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Diagnostic:Ticks" 0 "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Bridge:Count" 0 "LukesItemBrowserRuntime.ini"
+    let fSession := GetINIFloat "Bridge:Session" "LukesItemBrowserRuntime.ini"
+    if fSession > 0
+        SetINIFloat "Bridge:Ready" fSession "LukesItemBrowserRuntime.ini"
+        Print "[Luke's Item Browser] Item request bridge ready."
+    else
+        Print "[Luke's Item Browser] ERROR: native DLL has not published a session. Check nvse.log."
+    endif
+end
+
+
+
