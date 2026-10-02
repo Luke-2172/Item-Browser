@@ -13,7 +13,7 @@
     "0": {
       "columns": 1,
       "listTitle": "Settings",
-      "pageTitle": "Luke's Item Browser 1.0.2",
+      "pageTitle": "Luke's Item Browser 1.0.6",
       "enable": 1,
       "options": {
         "1": {
@@ -119,7 +119,7 @@
           "vars": [
             {
               "configINI": "Display:RenderScale",
-              "default": 2
+              "default": 3
             }
           ],
           "scale": {
@@ -137,6 +137,24 @@
           "enable": 1,
           "string": "Return to gameplay",
           "mouse": "Settings apply after closing the pause menu. Text resolution requires a restart."
+        },
+        "20": {
+          "type": 2,
+          "title": "Controller opening direction",
+          "enable": 1,
+          "mouse": "Hold Back + D-pad: 1 Left, 2 Right, 3 Up, 4 Down. Use different directions for the two browsers.",
+          "vars": [
+            {
+              "configINI": "Controls:ControllerOpenDirection",
+              "default": 1
+            }
+          ],
+          "scale": {
+            "valueMin": 1,
+            "valueMax": 4,
+            "valueIncrement": 1,
+            "valueDecimal": 0
+          }
         }
       }
     }

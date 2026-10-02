@@ -1,4 +1,4 @@
-LUKE'S ITEM BROWSER - VERSION 1.0.2
+LUKE'S ITEM BROWSER - VERSION 1.0.10
 Fallout: New Vegas 1.4.0.525, 32-bit Windows
 
 FEATURES
@@ -18,7 +18,7 @@ FEATURES
 
 REQUIREMENTS
 - Fallout: New Vegas runtime 1.4.0.525.
-- xNVSE 6.3.5 or newer: https://github.com/xNVSE/NVSE/releases
+- xNVSE 6.3.11 or newer: https://github.com/xNVSE/NVSE/releases
 - JIP LN NVSE 56.95 or newer for active plugin enumeration and adding items:
   https://www.nexusmods.com/newvegas/mods/58277
 - Native Direct3D 9 / DirectInput 8. DXVK, ENB and other rendering wrappers have
@@ -60,7 +60,7 @@ pickup sounds, include overrides and text resolution.
 The page and native browser share NVSE\Plugins\LukesItemBrowser.ini.
 MCM Extender saves changes when you leave the pause menu. The browser reads
 them within one second of returning to gameplay. Text resolution and
-FontFace changes require restarting New Vegas.
+Barlow Condensed Bold and Share Tech Mono are bundled and loaded privately from memory. No font installation is needed. Missing fonts use Arial/Consolas.
 The function-key slider displays the F prefix; its slider popup uses the number.
 
 Without MCM or MCM Extender, use the browser Settings tab or the INI.
@@ -118,7 +118,7 @@ Disable/remove the old LukesItemBrowserMCM.esp and MCM.gek/MCMReset.gek integrat
 For an existing custom INI, migrate Hotkey=122 to FunctionKey=11 (subtract 111).
 Do not merge with earlier builds: the DLL, scripts, folders and INI paths have all
 been renamed. Only enable one version. Reapply custom settings in LukesItemBrowser.ini.
-Native NVSE version is 102 (1.0.2).
+Native NVSE version is 104 (1.0.10).
 
 MENU SOUNDS
 Open: ui_vats_move.wav. Close: ui_vats_ready.wav.
@@ -131,4 +131,14 @@ Included zlib1.dll is a custom static wrapper built from the local MSYS2 libz.a;
 it is not the unmodified upstream DLL. License is in NVSE\Plugins\LukesItemBrowser.
 Reference styling supplied by the user; no game art was copied into the package.
 
-For 1.0.2 renderer recovery and failure diagnostics, see COMPATIBILITY.txt.
+For 1.0.10 renderer recovery and failure diagnostics, see COMPATIBILITY.txt.
+
+
+CURRENT UPDATE: See RELEASE-1.0.10.txt for Pip-Boy colours and Xbox controller controls.
+
+
+Controller gameplay isolation: see RELEASE-1.0.10.txt. Update both browsers and restart the game.
+
+This version replaces the previous controller hook with supported APIs. Requires xNVSE 6.3.11+. See RELEASE-1.0.10.txt for compatibility details.
+
+Controller shortcut: hold LB (left bumper) and press D-pad Left.

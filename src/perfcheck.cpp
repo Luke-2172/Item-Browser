@@ -2,6 +2,23 @@
 #include <chrono>
 #include <iostream>
 int main() {
+ {
+  wchar_t temp[MAX_PATH]{},file[MAX_PATH]{};GetTempPathW(MAX_PATH,temp);
+  if(!GetTempFileNameW(temp,L"LAB",0,file))return (40);
+  if(!CopyFileW(L"package/NVSE/Plugins/LukesItemBrowser/Fonts/ShareTechMono-Regular.ttf",file,FALSE))return (41);
+  VectorFont memoryFont;memoryFont.load(file,L"Share Tech Mono",FW_NORMAL);
+  if(!DeleteFileW(file))return (42);
+  std::vector<uint32_t> out(400*80,0);
+  memoryFont.draw(out.data(),400,80,0,0,400,80,"Memory font",37,RGB(255,255,255));
+  if(std::none_of(out.begin(),out.end(),[](uint32_t p){return p!=0;}))return (43);
+  VectorFont missing;loadMenuFont(missing,file,L"Share Tech Mono",FW_NORMAL,L"Consolas");
+  std::fill(out.begin(),out.end(),0);
+  missing.draw(out.data(),400,80,0,0,400,80,"Fallback",37,RGB(255,255,255));
+  if(std::none_of(out.begin(),out.end(),[](uint32_t p){return p!=0;}))return (44);
+  std::cout<<"PASS: memory font renders after file deletion; missing font uses fallback"<<std::endl;
+ }
+
+ loadMenuFonts(L"package/NVSE/Plugins/LukesItemBrowser/Fonts/");
  renderScale=2;if(!createCanvas())return 1;
  plugins={L"Test.esm"};pluginIndex=0;filteredPlugins={0};selected=0;
  for(int n=0;n<100;++n){catalog.items.push_back(ib::Item{(uint32_t)n,"WEAP","Fixture item "+std::to_string(n),"Fixture",false});visible.push_back(n);}

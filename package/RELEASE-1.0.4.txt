@@ -1,0 +1,19 @@
+LUKE'S ITEM BROWSER 1.0.5 - BUNDLED FONTS
+
+Barlow Condensed Bold headings and Share Tech Mono body text now match
+Actor Browser. Button and shortcut labels are centered using visible glyph
+bounds. Fonts are rasterized into cached atlases at the selected resolution.
+Default RenderScale is 3, with automatic texture-allocation fallback.
+
+Font files are read by the game process and registered from memory so MO2
+virtual paths work. Missing fonts fall back to Arial/Consolas. No Windows
+font installation or additional mod dependency is required.
+Both fonts are distributed under SIL OFL; their licenses accompany the TTFs.
+The old FontFace INI entry is no longer used.
+
+F11, item additions, VATS sounds, optional ESP-less MCM and the compatibility
+hooks remain unchanged. Actor Browser continues to use F10.
+
+Install as a replacement for Item Browser with only one version enabled.
+The source archive includes the fonts, licenses and build/test scripts.
+Automated checks do not replace in-game testing.

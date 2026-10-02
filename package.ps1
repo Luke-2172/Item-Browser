@@ -7,14 +7,15 @@ foreach ($file in @('NVSE/Plugins/LukesItemBrowser.dll','NVSE/Plugins/LukesItemB
 $out = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Force $out | Out-Null
 Add-Type -AssemblyName System.IO.Compression
-$path = Join-Path $out 'Lukes-Item-Browser-FNV-1.0.2.zip'
+$path = Join-Path $out 'Lukes-Item-Browser-FNV-1.0.10.zip'
 $stream = [IO.File]::Open($path,[IO.FileMode]::Create)
 $zip = [IO.Compression.ZipArchive]::new($stream,[IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($file in Get-ChildItem $package -Recurse -File) {
-        if ($file.Extension -notin @('.dll','.ini','.txt','.gek','.json')) { continue }
+        if ($file.Extension -notin @('.dll','.ini','.txt','.gek','.json','.ttf')) { continue }
         $relative = $file.FullName.Substring($package.Length+1).Replace('\','/')
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,$file.FullName,$relative,[IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
 } finally { $zip.Dispose(); $stream.Dispose() }
 Write-Output $path
+

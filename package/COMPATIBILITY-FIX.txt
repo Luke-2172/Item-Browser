@@ -1,0 +1,26 @@
+Compatibility repair: Actor Browser 1.0.2 / Item Browser 1.0.5
+
+Install both replacement archives when using both browsers. Replace the old mod versions completely; do not keep duplicate or renamed copies of either browser DLL. Preserve your custom INI settings if needed. Restart the game after replacing files.
+Actor Browser defaults to F10. Item Browser defaults to F11.
+
+Changes:
+- Preserve one hook chain per COM vtable and slot. Repeated keyboard/mouse or graphics factory capture no longer replaces a saved original with the other browser's hook.
+- Dispatch input and graphics factory calls through the correct interface's saved original, rather than a single global pointer.
+- Actor bridge uses the New Vegas Guns actor-value token (the old SmallGuns token was wrong).
+- Actor initialization erases temporary auxiliary references instead of passing the numeric literal 0 to a reference argument.
+- Resolve the player reference at runtime, and use an explicit numeric comparison for the applied-value tolerance.
+- Separate Initialise.gek and Tick.gek compilation diagnostics.
+- Preserve Actor Browser's three vanilla bitmap fonts, optional ESP-free MCM integration, and existing menu sounds.
+
+Validation:
+Both x86 DLLs build with /MT, /GS, /DYNAMICBASE and /NXCOMPAT.
+New hook-chain regression exercises both interposer orders, repeated capture, separate input tables, and factory/input slots.
+Existing native control, parser, MCM metadata, rendering and input checks are included in the source packages.
+GECK/xNVSE compilation and play testing of the revised bridge still require an in-game check. Native tests do not certify the game compiler or your complete mod list. This release does not claim to resolve the separate FNV Display Tweaks rendering conflict.
+
+Quick in-game check:
+1. Enable these two versions, launch through xNVSE, and load a save.
+2. Confirm the console reports Actor Browser script bridge initialization without a compile error.
+3. Open and close F10 and F11 several times; confirm mouse movement and scrolling.
+4. In Actor Browser, spawn one actor, read its values, then test one bounded value change on a disposable save.
+If compilation still fails, capture the exact compiler text above the named file error in the console and include nvse.log.

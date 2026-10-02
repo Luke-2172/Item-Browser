@@ -1,0 +1,2 @@
+Luke's Item Browser 1.0.10
+Opening/closing shortcut changed to LB + D-pad Left. Back/View is no longer the modifier. Keyboard shortcut and control-restoration behaviour unchanged.

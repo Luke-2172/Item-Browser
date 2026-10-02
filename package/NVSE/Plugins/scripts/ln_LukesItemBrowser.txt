@@ -1,4 +1,4 @@
-; Luke's Item Browser 1.0. Requires xNVSE 6.3.5+ and JIP LN 56.95+.
+; Luke's Item Browser 1.0. Requires xNVSE 6.3.11+ and JIP LN 56.95+.
 ; Keep this runner short: inline expressions have a 512-character limit.
 Print "[Luke's Item Browser] Starting script bridge 1.0..."
 ref rLukeInit
@@ -31,3 +31,11 @@ else
 endif
 
 
+
+ref rBrowserTheme
+let rBrowserTheme := CompileScript "LukesItemBrowser/Theme.gek"
+if rBrowserTheme
+    SetGameMainLoopCallback rBrowserTheme 1 30 11
+else
+    Print "[Item Browser] Colour sync unavailable. Using default colour."
+endif

@@ -1,0 +1,24 @@
+Luke's Item Browser 1.0.8 - Startup runtime error repair
+Author: luke2172
+
+Replace the previous installation and restart the game. Update both browsers if
+both are installed. Requires xNVSE 6.3.11+ and JIP LN 56.95+, unchanged.
+
+The previous native message handler locked the browser mutex for EVERY xNVSE
+notification, even notifications it did not use. On first main-loop initialization,
+it compiled the control helper scripts while holding that mutex. xNVSE sends a
+synchronous ScriptCompile notification, re-entering the same handler and attempting
+to lock the non-recursive mutex again. This could cause a runtime abort/deadlock.
+
+The handler now rejects unrelated notifications BEFORE taking the mutex. It still
+handles the main-loop and lifecycle messages needed for control restoration.
+The supported control API approach is retained. No controller polling hook or JIP
+hook-chain patch has been reintroduced.
+
+Regression: the real browser handler receives nested compiler/error/cache/event
+notifications while its mutex is already held. These must return without locking.
+Existing control ownership, rollback, held-input and lifecycle checks also pass.
+Automated checks do not replace in-game startup and physical-controller testing.
+
+See RELEASE-1.0.7.txt for the supported input API details and the limitation of
+JIP's shared button/trigger flags when another mod changes the same flags mid-menu.

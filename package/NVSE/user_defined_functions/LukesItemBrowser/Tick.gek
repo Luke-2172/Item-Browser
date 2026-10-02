@@ -12,7 +12,7 @@ float fSession
 begin Function {}
     let iReported := GetINIFloat "Diagnostic:Reported" "LukesItemBrowserRuntime.ini"
     if iReported != 1
-        if (GetINIFloat "Native:Frames" "LukesItemBrowserRuntime.ini") == 1 && (GetINIFloat "Native:Input" "LukesItemBrowserRuntime.ini") == 1
+        if (GetINIFloat "Native:Frames" "LukesItemBrowserRuntime.ini") == 1 && (GetINIFloat "Native:ControlsAPI" "LukesItemBrowserRuntime.ini") == 1 && (GetINIFloat "Native:Input" "LukesItemBrowserRuntime.ini") == 1
             let sHotkey := GetINIString "Native:Hotkey" "LukesItemBrowserRuntime.ini"
             Print "[Luke's Item Browser] initialised - renderer, input and script bridge ready."
             Print "[Luke's Item Browser] Open menu with " + sHotkey
@@ -22,7 +22,7 @@ begin Function {}
             let iTicks += 1
             SetINIFloat "Diagnostic:Ticks" iTicks "LukesItemBrowserRuntime.ini"
             if iTicks >= 20
-                Print "[Luke's Item Browser] WARNING: renderer/input not ready. See LukesItemBrowser.log and runtime INI."
+                Print "[Luke's Item Browser] WARNING: renderer/input/control helpers not ready. See LukesItemBrowser.log and runtime INI."
                 let sError := GetINIString "Native:Error" "LukesItemBrowserRuntime.ini"
                 Print "[Luke's Item Browser] Native status: " + sError
                 SetINIFloat "Diagnostic:Reported" 2 "LukesItemBrowserRuntime.ini"

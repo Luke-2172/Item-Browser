@@ -12,15 +12,49 @@
 #include <map>
 #include "catalog.h"
 #include "importhook.h"
+#include "vectorfonts.h"
+#include "controller.h"
+#include "controllease.h"
+#include "nvsemessaging.h"
+#include "hookregistry.h"
+static HookRegistry hookRegistry;
 
 // Uses only the four-field version prefix of the public NVSE query ABI.
 struct NVSEVersionPrefix { uint32_t nvseVersion,runtimeVersion,editorVersion,isEditor; };
 struct PluginInfo { uint32_t infoVersion; const char* name; uint32_t version; };
+static controls::ScriptInputAPI controlButtons;
+static controls::Lease controlLease;
+static BrowserPlayerControls* controlAPI=nullptr;
+static BrowserScriptAPI* controlScripts=nullptr;
+static void* menuModeScript=nullptr;
+static bool controlsReady=false;
+static unsigned controlInitAttempts=0;static DWORD controlRetryAt=0;
+static std::atomic<bool> nativeLoopActive{false};
+static bool gameMenuActive(){
+ BrowserScriptResult result{};
+ return !menuModeScript||!controlScripts->call(menuModeScript,nullptr,nullptr,&result,0)||result.type!=1||result.number!=0;
+}
 static HMODULE moduleHandle;
 static std::wstring root,iniPath;
 static std::wstring bridgePath;
 static UINT sessionToken=0;
 static int quantity=1;
+static bool controllerPrompts=false;
+static pad::Decoder controllerDecoder;
+static WORD controllerOpenButton=XINPUT_GAMEPAD_DPAD_LEFT;
+static HANDLE browserGate=nullptr;
+static bool ownsBrowserGate=false;
+static uint32_t themeRGB=0xFFBD42;
+static void drawControllerFocus();
+static bool acquireBrowser(){
+ if(!browserGate){auto name=L"Local\\LukeBrowsers-"+std::to_wstring(GetCurrentProcessId());browserGate=CreateSemaphoreW(nullptr,1,1,name.c_str());}
+ if(!browserGate||WaitForSingleObject(browserGate,0)!=WAIT_OBJECT_0)return false;
+ ownsBrowserGate=true;return true;
+}
+static void releaseBrowser(){if(ownsBrowserGate){ReleaseSemaphore(browserGate,1,nullptr);ownsBrowserGate=false;}}
+static uint32_t tintPixel(unsigned brightness){
+ return (((themeRGB>>16)&255)*brightness/255<<16)|(((themeRGB>>8)&255)*brightness/255<<8)|((themeRGB&255)*brightness/255);
+}
 static bool livePlugins=false;
 static std::atomic<bool> opened{false};
 static std::atomic<DWORD> blockUntil{0};
@@ -53,8 +87,29 @@ static float cursorX=550,cursorY=350;
 static bool previousKeys[256]{};
 static HWND gameWindow=nullptr;
 static HBRUSH background;
-static HFONT font,titleFont,smallFont,detailFont;
-static wchar_t fontFace[128]=L"Bahnschrift SemiCondensed";
+static constexpr int font=1,titleFont=2,smallFont=3,detailFont=4,glowFont=5,capsFont=6;
+static VectorFont vanillaBody,vanillaHeading;
+static auto& vanillaGlow=vanillaBody;
+static void logLine(const char* text);
+static void loadMenuFont(VectorFont& face,const std::wstring& file,const wchar_t* family,int weight,const wchar_t* backup) {
+ try {
+  face.load(file,family,weight);
+  uint32_t scratch=0;face.draw(&scratch,1,1,0,0,1,1,"A",22,RGB(255,255,255));
+ }catch(const std::exception& error){
+  logLine(error.what());logLine("Using system font fallback; browser remains available.");
+  face.useSystemFont(backup,weight);
+ }
+}
+static void loadMenuFonts(const std::wstring& directory) {
+ loadMenuFont(vanillaHeading,directory+L"BarlowCondensed-Bold.ttf",L"Barlow Condensed",FW_BOLD,L"Arial");
+ loadMenuFont(vanillaBody,directory+L"ShareTechMono-Regular.ttf",L"Share Tech Mono",FW_NORMAL,L"Consolas");
+ uint32_t scratch=0;
+ for(int scale=1;scale<=3;++scale)for(int size:{17,22,27,32}){
+  if(size==22||size==32)vanillaHeading.draw(&scratch,1,1,0,0,1,1,"A",size*scale,RGB(255,255,255));
+  if(size!=32)vanillaBody.draw(&scratch,1,1,0,0,1,1,"A",size*scale,RGB(255,255,255));
+ }
+}
+
 static HDC canvas;
 static HBITMAP bitmap;
 static void* pixels;
@@ -69,8 +124,8 @@ static int renderScale=2;
 static void destroyCanvas() {
  if(canvas)DeleteDC(canvas);canvas=nullptr;
  if(bitmap)DeleteObject(bitmap);bitmap=nullptr;pixels=nullptr;
- for(auto f:{font,titleFont,smallFont,detailFont})if(f)DeleteObject(f);
- font=titleFont=smallFont=detailFont=nullptr;
+
+
 }
 static int rasterWidth() {return Width*renderScale;}
 static int rasterHeight() {return Height*renderScale;}
@@ -81,13 +136,7 @@ static bool createCanvas() {
  if(!canvas||!bitmap||!pixels)return false;
  SelectObject(canvas,bitmap);SetMapMode(canvas,MM_ANISOTROPIC);
  SetWindowExtEx(canvas,Width,Height,nullptr);SetViewportExtEx(canvas,rasterWidth(),rasterHeight(),nullptr);
- GetPrivateProfileStringW(L"Display",L"FontFace",L"Bahnschrift SemiCondensed",fontFace,128,iniPath.c_str());
- // Text is measured directly in raster pixels, avoiding logical-unit advance rounding.
- font=CreateFontW(-22*renderScale,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_ONLY_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,fontFace);
- titleFont=CreateFontW(-38*renderScale,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_ONLY_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,fontFace);
- smallFont=CreateFontW(-16*renderScale,0,0,0,FW_MEDIUM,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_ONLY_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,fontFace);
- detailFont=CreateFontW(-27*renderScale,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_ONLY_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,fontFace);
- return font&&titleFont&&smallFont&&detailFont;
+ return true;
 }
 static const char* categories[]={"All","WEAP","ARMO","AMMO","ALCH","MISC","BOOK","KEYM","IMOD","NOTE"};
 static const char* categoryLabels[]={"All","Weapons","Armour","Ammo","Aid","Misc","Books","Keys","Mods","Notes"};
@@ -202,22 +251,19 @@ static void requestItem() { dirty=true;
 }
 static bool inside(int x,int y,int w,int h) {return cursorX>=x && cursorX<x+w && cursorY>=y && cursorY<y+h;}
 static void fill(int x,int y,int w,int h,COLORREF color) { RECT r{x,y,x+w,y+h}; auto b=CreateSolidBrush(color); FillRect(canvas,&r,b); DeleteObject(b); }
-static void text(int x,int y,int w,int h,const std::wstring& t,COLORREF color=RGB(235,182,86),HFONT f=nullptr) {
- int saved=SaveDC(canvas);if(!saved)return;
- SetMapMode(canvas,MM_TEXT);SetWindowOrgEx(canvas,0,0,nullptr);SetViewportOrgEx(canvas,0,0,nullptr);
- SelectObject(canvas,f?f:font);SetTextCharacterExtra(canvas,0);SetTextJustification(canvas,0,0);
- SetTextColor(canvas,color); SetBkMode(canvas,TRANSPARENT);
- RECT r{x*renderScale,y*renderScale,(x+w)*renderScale,(y+h)*renderScale};
- DrawTextW(canvas,t.c_str(),(int)t.size(),&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
- RestoreDC(canvas,saved);
+static void text(int x,int y,int w,int h,const std::wstring& t,COLORREF color=RGB(235,182,86),int f=0,bool centered=false) {
+ GdiFlush();
+ const auto& face=(f==titleFont||f==capsFont)?vanillaHeading:(f==detailFont||f==glowFont)?vanillaGlow:vanillaBody;
+ int size=f==titleFont?32:f==smallFont?17:f==detailFont?27:22;
+ face.draw((uint32_t*)pixels,rasterWidth(),rasterHeight(),x*renderScale,y*renderScale,w*renderScale,h*renderScale,narrow(t),size*renderScale,color,centered,f==titleFont?0.8f*renderScale:0.f);
 }
-static void label(int x,int y,int w,int h,const std::string& t,COLORREF color=RGB(235,182,86),HFONT f=nullptr) {text(x,y,w,h,wide(t),color,f);}
+static void label(int x,int y,int w,int h,const std::string& t,COLORREF color=RGB(235,182,86),int f=0,bool centered=false) {text(x,y,w,h,wide(t),color,f,centered);}
 static void border(int x,int y,int w,int h,COLORREF c=RGB(121,92,45)) {fill(x,y,w,1,c);fill(x,y+h-1,w,1,c);fill(x,y,1,h,c);fill(x+w-1,y,1,h,c);}
-static void button(int x,int y,int w,int h,const std::string& t,bool active=false) {
- if(active)fill(x,y,w,h,RGB(57,44,22));border(x,y,w,h,active?RGB(246,185,77):RGB(129,96,43));label(x+8,y,w-16,h,t);
+static void button(int x,int y,int w,int h,const std::string& t,bool active=false,int face=glowFont) {
+ if(active)fill(x,y,w,h,RGB(57,44,22));border(x,y,w,h,active?RGB(246,185,77):RGB(129,96,43));label(x+8,y,w-16,h,t,RGB(235,182,86),face,true);
 }
 static void tab(int x,int y,int w,const std::string& t,bool active) {
- if(active)button(x,y,w,30,t,true);else label(x+8,y,w-16,30,t,RGB(170,128,61));
+ if(active)button(x,y,w,30,t,true,capsFont);else label(x+8,y,w-16,30,t,RGB(170,128,61),capsFont,true);
 }
 static int scrollThumb(int count) {return count<=ListRows?ListHeight:std::max(24,ListHeight*ListRows/count);}
 static int scrollY(int scroll,int count) {return ListTop+(count>ListRows?(ListHeight-scrollThumb(count))*scroll/(count-ListRows):0);}
@@ -225,7 +271,7 @@ static void scrollbar(int x,int scroll,int count) {
  fill(x+3,ListTop,1,ListHeight,RGB(120,90,41));if(count>ListRows)fill(x+1,scrollY(scroll,count),5,scrollThumb(count),RGB(247,185,76));
 }
 static void shortcut(int x,int w,const std::string& key,const std::string& title) {
- border(x,623,w,31);label(x+5,623,w-10,31,key,RGB(235,182,86),smallFont);label(x+w+8,623,135,31,title);
+ border(x,623,w,31);label(x+5,623,w-10,31,key,RGB(235,182,86),smallFont,true);label(x+w+8,623,135,31,title);
 }
 // Shared category geometry keeps visible tabs and mouse targets aligned.
 static const int categoryWidths[]={44,92,88,68,48,57,65,55,63,67};
@@ -233,7 +279,7 @@ static int categoryX(int index) {int x=27;for(int n=0;n<index;++n)x+=categoryWid
 static void panel(int x,int w,const char* title) {
  border(x,153,w,449,RGB(103,78,39));
  fill(x+1,154,w-2,31,RGB(35,31,22));
- label(x+10,154,w-20,30,title,RGB(248,188,79));
+ label(x+10,154,w-20,30,title,RGB(248,188,79),capsFont);
  fill(x+1,185,w-2,1,RGB(173,126,48));
 }
 static void buildBackdrop() {
@@ -284,7 +330,7 @@ static void applyAlpha(int left,int top,int right,int bottom) {
  for(int y=top;y<bottom;++y)for(int x=left;x<right;++x){
   size_t i=(size_t)y*rasterWidth()+x;uint32_t c=p[i];
   if(x>=7*renderScale&&x<(Width-13)*renderScale&&y>=7*renderScale&&y<(Height-13)*renderScale){
-   unsigned b=std::max({c&255,(c>>8)&255,(c>>16)&255});p[i]=(c&0xFFFFFF)|lut[b];
+   unsigned b=std::max({c&255,(c>>8)&255,(c>>16)&255});p[i]=tintPixel(b)|lut[b];
   }else {
    float lx=x/(float)renderScale,ly=y/(float)renderScale;
    float dx=std::max({13.f-lx,0.f,lx-(Width-13.f)}),dy=std::max({13.f-ly,0.f,ly-(Height-13.f)});
@@ -309,20 +355,20 @@ static void drawCanvas() {
  border(9,9,Width-24,Height-24,RGB(255,189,66));
  border(10,10,Width-26,Height-26,RGB(230,161,47));
  border(11,11,Width-28,Height-28,RGB(88,62,24));
- label(28,20,650,50,"LUKE'S ITEM BROWSER",RGB(250,194,90),titleFont);
+ label(28,20,650,50,"ITEM BROWSER",RGB(250,194,90),titleFont);
  tab(858,27,108,"BROWSER",!settingsPage);tab(978,27,110,"SETTINGS",settingsPage);
  fill(26,144,1067,1,RGB(163,117,45));
  if(settingsPage) {
-  label(32,150,600,36,"DISPLAY AND CONTROLS",RGB(250,194,90));
+  label(32,150,600,36,"DISPLAY AND CONTROLS",RGB(250,194,90),capsFont);
   label(32,210,470,32,"MOUSE SPEED");button(510,210,75,32,"-",false);button(598,210,135,32,std::to_string((int)(mouseSpeed*100))+"%",true);button(746,210,75,32,"+");
   label(32,267,470,32,"BACKGROUND OPACITY");button(510,267,75,32,"-");button(598,267,135,32,std::to_string(backgroundOpacity)+"%",true);button(746,267,75,32,"+");
   label(32,324,470,32,"MENU OPEN / CLOSE SOUNDS");button(510,324,180,32,menuSounds?"ON":"OFF",menuSounds);
   label(32,381,470,32,"ITEM PICKUP SOUNDS");button(510,381,180,32,pickupSounds?"ON":"OFF",pickupSounds);
   label(32,438,470,32,"INCLUDE OVERRIDE RECORDS");button(510,438,180,32,showOverrides?"ON":"OFF",showOverrides);
   label(32,510,980,30,"Settings save to LukesItemBrowser.ini. Hotkey and render resolution can also be edited there.",RGB(183,155,103),smallFont);
-  button(32,563,190,32,"REFRESH PLUGINS");button(242,563,190,32,"CLEAR SEARCH");
+  button(32,563,190,32,"REFRESH LIST");button(242,563,190,32,"CLEAR SEARCH");
  } else {
-  for(int i=0;i<10;++i) {std::string t=categoryLabels[i];for(auto& c:t)c=(char)toupper(c);int x=categoryX(i),w=categoryWidths[i];if(category==i){fill(x,104,w,30,RGB(57,44,22));border(x,104,w,30,RGB(246,185,77));}label(x+6,104,w-12,30,t,category==i?RGB(250,194,90):RGB(190,147,73),smallFont);}
+  for(int i=0;i<10;++i) {std::string t=categoryLabels[i];for(auto& c:t)c=(char)toupper(c);int x=categoryX(i),w=categoryWidths[i];if(category==i){fill(x,104,w,30,RGB(57,44,22));border(x,104,w,30,RGB(246,185,77));}label(x+6,104,w-12,30,t,category==i?RGB(250,194,90):RGB(190,147,73),smallFont,true);}
   label(788,72,62,26,"SEARCH",RGB(174,135,70),smallFont);
   button(855,72,99,26,"ITEMS",searchScope==2);button(961,72,128,26,"PLUGINS",searchScope==1);
   const auto& searchText=searchScope==1?pluginQuery:query;
@@ -338,14 +384,20 @@ static void drawCanvas() {
    if(i.overrideRecord&&(i.id>>24)<catalog.masters.size())label(727,375,350,30,catalog.masters[i.id>>24]);else text(727,375,350,30,plugins[pluginIndex]);
    label(727,421,350,28,"EDITOR ID",RGB(171,132,67));label(727,448,350,30,i.editor.empty()?"(none)":i.editor);
    label(727,490,350,25,std::string("LOCAL ID: ")+id,RGB(180,143,80),smallFont);
-   fill(725,535,358,1,RGB(137,102,45));label(727,551,103,32,"Quantity:");
+   fill(725,535,358,1,RGB(137,102,45));label(727,551,103,32,"Quantity:",RGB(235,182,86),smallFont);
    const int counts[]={1,10,100};for(int n=0;n<3;++n)button(834+n*84,551,72,32,std::to_string(counts[n]),quantity==counts[n]);
   }
   label(28,601,560,22,std::to_string(visible.size())+" ITEMS  /  "+std::to_string(filteredPlugins.size())+(livePlugins?" LOADED PLUGINS":" INSTALLED PLUGINS"),RGB(170,132,70),smallFont);
  }
- if(!settingsPage)shortcut(609,60,"ENTER","ADD ITEM");shortcut(810,45,"F"+std::to_string(hotkey-VK_F1+1),"CLOSE");shortcut(973,45,"ESC","BACK");
- label(28,624,560,29,settingsPage?"Preferences apply immediately":"Double-click an item to add it",RGB(173,139,84),smallFont);
- label(28,658,1058,25,status,RGB(200,162,103),smallFont);
+ if(controllerPrompts){
+  label(28,624,1060,29,"A Select   X Add   B Back   LB/RB Column   LT/RT Page   START Tabs   Y Search",RGB(235,182,86),smallFont);
+ }else{
+  if(!settingsPage )shortcut(609,60,"ENTER","ADD ITEM");shortcut(810,45,"F"+std::to_string(hotkey-VK_F1+1),"CLOSE");shortcut(973,45,"ESC","BACK");
+  label(28,624,560,29,focus?"Type using the PC keyboard":"Double-click a record to add it",RGB(173,139,84),smallFont);
+ }
+ label(28,658,790,25,status,RGB(200,162,103),smallFont);
+ label(846,658,244,25,"v1.0.10  |  luke2172",RGB(173,139,84),smallFont,true);
+ drawControllerFocus();
  applyAlpha(0,0,rasterWidth(),rasterHeight());
 }
 static void menuSound(int event) {if(menuSounds&&!bridgePath.empty())WritePrivateProfileStringW(L"Audio",L"Menu",std::to_wstring(event).c_str(),bridgePath.c_str());}
@@ -407,16 +459,30 @@ static void scrollWheel(long delta) {
  int next=std::clamp(offset-steps*3,0,std::max(0,count-ListRows));
  if(next!=offset){offset=next;listDirty|=target;lastClickItem=-1;}
 }
+static void setPromptMode(bool controller){if(controllerPrompts!=controller){controllerPrompts=controller;dirty=true;}}
+#include "navigation.h"
 static void inputs() {
  static DWORD lastConfigPoll=0;
- if(GetTickCount()-lastConfigPoll>=1000){lastConfigPoll=GetTickCount();config();}
+ if(GetTickCount()-lastConfigPoll>=1000){lastConfigPoll=GetTickCount();config();
+  if(bridgeNumber(L"Theme",L"Session")==sessionToken&&sessionToken){
+   unsigned r=bridgeNumber(L"Theme",L"Red"),g=bridgeNumber(L"Theme",L"Green"),b=bridgeNumber(L"Theme",L"Blue");
+   if(r<=255&&g<=255&&b<=255){uint32_t next=(r<<16)|(g<<8)|b;if(next!=themeRGB){themeRGB=next;dirty=true;}}
+  }
+  const WORD directions[]={XINPUT_GAMEPAD_DPAD_LEFT,XINPUT_GAMEPAD_DPAD_RIGHT,XINPUT_GAMEPAD_DPAD_UP,XINPUT_GAMEPAD_DPAD_DOWN};
+  controllerOpenButton=directions[(int)setting(L"Controls",L"ControllerOpenDirection",1,1,4)-1];}
  DWORD process=0; GetWindowThreadProcessId(GetForegroundWindow(),&process);
  if(process!=GetCurrentProcessId()) {if(opened)closeBrowser();return;}
+ auto controllerEvent=controllerDecoder.update(pad::sample(),GetTickCount(),controllerOpenButton);
  bool pressed[256]{};
  if(opened||!monitorActive)for(int k=0;k<256;++k) {bool down=(GetAsyncKeyState(k)&0x8000)!=0;pressed[k]=down&&!previousKeys[k];previousKeys[k]=down;}
  bool queued=consumeToggle(GetTickCount());
- if(queued||(!monitorActive&&pressed[hotkey])) {if(opened) closeBrowser();else {logLine("Hotkey detected; opening browser.");config();if(!loading){scanPlugins();pluginIndex=-1;catalog={};filterItems();}opened=true;dirty=true;settingsPage=false;lastClickItem=-1;menuSound(1);cursorX=560;cursorY=350;mouseDX=0;mouseDY=0;wheelDelta=0;}return;}
+ if(controllerEvent.chord||queued||(!monitorActive&&pressed[hotkey])) {if(opened) closeBrowser();else {if(!controlsReady||gameMenuActive()||!acquireBrowser())return;
+if(!controlLease.acquire()){if(!controlLease.active())releaseBrowser();logLine("Could not acquire supported player controls. Menu opening cancelled.");return;}
+controllerPrompts=controllerEvent.chord;logLine("Opening browser.");config();if(!loading){scanPlugins();pluginIndex=-1;catalog={};filterItems();}opened=true;dirty=true;settingsPage=false;lastClickItem=-1;menuSound(1);cursorX=controllerPrompts?180.f:560.f;cursorY=controllerPrompts?204.f:350.f;mouseDX=0;mouseDY=0;wheelDelta=0;}return;}
  if(!opened)return;
+ bool keyboardActivity=false;for(int k=1;k<256;++k)if(pressed[k])keyboardActivity=true;
+ if((keyboardActivity||mouseDX.load()!=0||mouseDY.load()!=0||wheelDelta.load()!=0)&&controllerPrompts)setPromptMode(false);
+ controllerActions(controllerEvent);if(!opened)return;
  if(pressed[VK_ESCAPE]) {if(settingsPage){settingsPage=false;dirty=true;}else closeBrowser();return;}
  cursorX=std::clamp(cursorX+mouseDX.exchange(0)*mouseSpeed,0.f,(float)Width-1); cursorY=std::clamp(cursorY+mouseDY.exchange(0)*mouseSpeed,0.f,(float)Height-1);
  if(pressed[VK_LBUTTON])click();if(!previousKeys[VK_LBUTTON])dragScroll=0;else if(dragScroll)dragScrollbar();
@@ -451,19 +517,15 @@ static bool blockInput() {
  return opened || (LONG)(blockUntil.load()-GetTickCount())>0;
 }
 static HRESULT STDMETHODCALLTYPE stateHook(IDirectInputDevice8W* dev,DWORD size,LPVOID data) {
- auto hr=originalState(dev,size,data); if(SUCCEEDED(hr)&&data&&blockInput()) {
+ auto next=hookRegistry.next<StateFn>(dev,9);if(!next)return DIERR_GENERIC;auto hr=next(dev,size,data); if(SUCCEEDED(hr)&&data&&blockInput()) {
   if(opened && (size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))) {auto m=(DIMOUSESTATE*)data;mouseDX+=m->lX;mouseDY+=m->lY;wheelDelta+=m->lZ;}
   memset(data,0,size);
  } return hr;
 }
 static HRESULT STDMETHODCALLTYPE dataHook(IDirectInputDevice8W* dev,DWORD size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags) {
- auto hr=originalData(dev,size,data,count,flags); if(SUCCEEDED(hr)&&blockInput()&&count) *count=0; return hr;
+ auto next=hookRegistry.next<DataFn>(dev,10);if(!next)return DIERR_GENERIC;auto hr=next(dev,size,data,count,flags); if(SUCCEEDED(hr)&&blockInput()&&count) *count=0; return hr;
 }
-static bool replaceSlot(void** table,int slot,void* hook,void** original) {
- if(table[slot]==hook)return true;
- DWORD old=0;if(!VirtualProtect(table+slot,sizeof(void*),PAGE_READWRITE,&old))return false;
- *original=table[slot]; InterlockedExchangePointer((PVOID volatile*)(table+slot),hook); DWORD unused;VirtualProtect(table+slot,sizeof(void*),old,&unused);return true;
-}
+static bool replaceSlot(void** table,int slot,void* hook,void** original) {return hookRegistry.install(table,slot,hook,original);}
 using EndFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*);
 using ResetFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*);
 using PresentFn=HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*,const RECT*,const RECT*,HWND,const RGNDATA*);
@@ -488,7 +550,7 @@ static HRESULT STDMETHODCALLTYPE resetExHook(IDirect3DDevice9Ex* dev,D3DPRESENT_
 }
 static bool ensureTexture(IDirect3DDevice9* dev) {
  if(texture)return true;
- if((!canvas||!pixels||!font||!titleFont||!smallFont||!detailFont)&&!createCanvas())return false;
+ if((!canvas||!pixels)&&!createCanvas())return false;
  while(true) {
   HRESULT hr=dev->CreateTexture(rasterWidth(),rasterHeight(),1,0,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&texture,nullptr);
   if(SUCCEEDED(hr))return true;
@@ -542,8 +604,8 @@ static void draw(IDirect3DDevice9* dev) {
  // Pip-Boy-style solid amber arrow: independent geometry follows input every frame.
  dev->SetTexture(0,nullptr);dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_DIFFUSE);
  float cx=x+cursorX*scale,cy=y+cursorY*scale;
- Vertex arrow[]={{cx,cy,0,1,0xFFFFC350,0,0},{cx+18*scale,cy+18*scale,0,1,0xFFFFC350,0,0},{cx+7*scale,cy+18*scale,0,1,0xFFFFC350,0,0},{cx,cy+25*scale,0,1,0xFFFFC350,0,0}};
- dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN,2,arrow,sizeof(Vertex));block->Apply();block->Release();
+ Vertex arrow[]={{cx,cy,0,1,(0xFF000000|themeRGB),0,0},{cx+18*scale,cy+18*scale,0,1,(0xFF000000|themeRGB),0,0},{cx+7*scale,cy+18*scale,0,1,(0xFF000000|themeRGB),0,0},{cx,cy+25*scale,0,1,(0xFF000000|themeRGB),0,0}};
+ if(!controllerPrompts)dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN,2,arrow,sizeof(Vertex));block->Apply();block->Release();
 }
 // Render targets/depth surfaces are not saved by a D3D9 state block.
 // Use an explicit scope so an offscreen pass can never receive the menu.
@@ -580,7 +642,7 @@ static void renderForPresent(IDirect3DDevice9* dev) {
  if(!cp.hFocusWindow||!IsWindowVisible(cp.hFocusWindow))return;
  lastFrameTick=GetTickCount();
  if(!frameSeen.exchange(true)){logLine("Game Present observed; backbuffer renderer initialised.");nativeStatus(L"Frames",L"1");}
- std::unique_lock<std::mutex> guard(catalogMutex);gameWindow=cp.hFocusWindow;inputs();
+ std::unique_lock<std::mutex> guard(catalogMutex);gameWindow=cp.hFocusWindow;if(!nativeLoopActive)inputs();
  if(!opened)return;
  BackbufferScope target(dev);HRESULT hr=target.bind();
  if(FAILED(hr)){graphicsError("Bind presentation backbuffer",hr);closeBrowser();return;}
@@ -618,10 +680,10 @@ static void attachRenderer(IDirect3DDevice9* device,bool extended=false) {
  nativeStatus(L"Hooks",L"1");logLine("Captured the game's D3D9 device; EndScene and Reset hooks attached.");
 }
 static HRESULT STDMETHODCALLTYPE createDeviceHook(IDirect3D9* self,UINT adapter,D3DDEVTYPE type,HWND window,DWORD flags,D3DPRESENT_PARAMETERS* pp,IDirect3DDevice9** device) {
- auto hr=originalCreateDevice(self,adapter,type,window,flags,pp,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device);return hr;
+ auto next=hookRegistry.next<CreateDeviceFn>(self,16);if(!next)return D3DERR_INVALIDCALL;auto hr=next(self,adapter,type,window,flags,pp,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device);return hr;
 }
 static HRESULT STDMETHODCALLTYPE createDeviceExHook(IDirect3D9Ex* self,UINT adapter,D3DDEVTYPE type,HWND window,DWORD flags,D3DPRESENT_PARAMETERS* pp,D3DDISPLAYMODEEX* mode,IDirect3DDevice9Ex** device) {
- auto hr=originalCreateDeviceEx(self,adapter,type,window,flags,pp,mode,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device,true);return hr;
+ auto next=hookRegistry.next<CreateDeviceExFn>(self,20);if(!next)return D3DERR_INVALIDCALL;auto hr=next(self,adapter,type,window,flags,pp,mode,device);if(SUCCEEDED(hr)&&device)attachRenderer(*device,true);return hr;
 }
 static IDirect3D9* WINAPI factoryHook(UINT version) {
  auto d3d=originalFactory(version);if(d3d)replaceSlot(*(void***)d3d,16,(void*)createDeviceHook,(void**)&originalCreateDevice);return d3d;
@@ -631,6 +693,7 @@ static HRESULT WINAPI factoryExHook(UINT version,IDirect3D9Ex** out) {
 }
 static FARPROC WINAPI getProcHook(HMODULE mod,LPCSTR name) {
  auto proc=originalGetProc(mod,name);if(!proc || (uintptr_t)name<=0xFFFF)return proc;
+
  if(!strcmp(name,"Direct3DCreate9")) {originalFactory=(FactoryFn)proc;logLine("Intercepted game Direct3DCreate9 lookup.");return (FARPROC)factoryHook;}
  if(!strcmp(name,"Direct3DCreate9Ex")) {originalFactoryEx=(FactoryExFn)proc;logLine("Intercepted game Direct3DCreate9Ex lookup.");return (FARPROC)factoryExHook;}
  return proc;
@@ -640,7 +703,7 @@ using InputDeviceFn=HRESULT (STDMETHODCALLTYPE*)(IDirectInput8W*,REFGUID,IDirect
 static InputFactoryFn originalInputFactory;
 static InputDeviceFn originalInputDevice;
 static HRESULT STDMETHODCALLTYPE inputDeviceHook(IDirectInput8W* self,REFGUID guid,IDirectInputDevice8W** out,LPUNKNOWN outer) {
- auto hr=originalInputDevice(self,guid,out,outer);
+ auto next=hookRegistry.next<InputDeviceFn>(self,3);if(!next)return DIERR_GENERIC;auto hr=next(self,guid,out,outer);
  if(SUCCEEDED(hr)&&out&&*out&&(guid==GUID_SysMouse||guid==GUID_SysKeyboard)) {
   auto table=*(void***)*out;
   if(replaceSlot(table,9,(void*)stateHook,(void**)&originalState)&&replaceSlot(table,10,(void*)dataHook,(void**)&originalData)) {
@@ -676,10 +739,12 @@ static DWORD WINAPI initialize(void*) {
  WritePrivateProfileStringW(L"Bridge",L"Ready",L"0",bridgePath.c_str());WritePrivateProfileStringW(L"Request",L"Pending",L"0",bridgePath.c_str());
  WritePrivateProfileStringW(L"Audio",L"Menu",L"0",bridgePath.c_str());nativeStatus(L"Frames",L"0");nativeStatus(L"Input",L"0");nativeStatus(L"Hooks",L"0");nativeStatus(L"Error",L"");config();
  auto z=LoadLibraryExW((root+L"Data\\NVSE\\Plugins\\LukesItemBrowser\\zlib1.dll").c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);if(z)inflateFn=(ib::Inflate)GetProcAddress(z,"uncompress");
- logLine("Luke's Item Browser 1.0.2: NVSEPlugin_Load entered; installing game factory hooks.");
+ logLine("Luke's Item Browser 1.0.10: NVSEPlugin_Load entered; installing game factory hooks.");
  if(!inflateFn)failNative("zlib1.dll could not be loaded; compressed item records unavailable");
- renderScale=(int)setting(L"Display",L"RenderScale",2,1,3);
+ try {loadMenuFonts(root+L"Data\\NVSE\\Plugins\\LukesItemBrowser\\Fonts\\");}catch(const std::exception& e){failNative(e.what());return 1;}
+ renderScale=(int)setting(L"Display",L"RenderScale",3,1,3);
  while(!createCanvas()){if(renderScale<=1){failNative("GDI canvas creation failed");destroyCanvas();return 1;}--renderScale;}
+ pad::initialize();
  auto exeModule=GetModuleHandleW(nullptr);
  bool imports=hookImport(exeModule,"GetProcAddress",(void*)getProcHook,(void**)&originalGetProc);
  // Also support hosts that import the factory directly.
@@ -692,16 +757,66 @@ static DWORD WINAPI initialize(void*) {
  return 0;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEVersionPrefix* nvse,PluginInfo* info) {
- info->infoVersion=1;info->name="Luke's Item Browser";info->version=102;
+ info->infoVersion=1;info->name="Luke's Item Browser";info->version=110;
  wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);root=exe;root=root.substr(0,root.find_last_of(L"\\/")+1);
  if(!nvse){logLine("Query rejected: missing NVSE interface.");return false;}
  if(nvse->isEditor){logLine("Query rejected: this plugin runs in the game, not GECK.");return false;}
  if(nvse->runtimeVersion!=0x040020D0){logLine("Query rejected: unsupported game runtime (requires standard 1.4.0.525).");return false;}
  if(nvse->nvseVersion<6){logLine("Query rejected: xNVSE 6 or newer required.");return false;}
- logLine("Luke's Item Browser 1.0.2: runtime query accepted.");return true;
+ logLine("Luke's Item Browser 1.0.10: runtime query accepted.");return true;
 }
-extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const void*) {
+static void browserNVSEMessage(BrowserNVSEMessage* message){
+ if(!message)return;
+ // CompileScript dispatches ScriptCompile synchronously. Reject unrelated
+ // messages BEFORE locking: that notification can re-enter during initialization.
+ const bool lifecycle=message->type==1||message->type==2||message->type==6||message->type==7||message->type==14;
+ if(message->type!=BrowserMainGameLoop&&!lifecycle)return;
+ std::unique_lock<std::mutex> guard(catalogMutex);
+ // Release on exit, main-menu return, loading or a new game. Never save control locks.
+ if(lifecycle){
+  opened=false;blockUntil=0;toggleQueued=false;controllerDecoder={};controlInitAttempts=0;controlRetryAt=0;
+  if(controlLease.release())releaseBrowser();
+  return;
+ }
+ if(message->type!=BrowserMainGameLoop)return;
+ nativeLoopActive=true;
+ // Wait for this process's JIP load/new-game bridge, rather than compiling at
+ // the first startup frame. Retry transient failures without compiling every frame.
+ if(!controlsReady&&controlInitAttempts<3&&bridgeNumber(L"Bridge",L"Ready")==sessionToken&&
+    (LONG)(GetTickCount()-controlRetryAt)>=0){
+  ++controlInitAttempts;controlRetryAt=GetTickCount()+2000;
+  bool helpers=controlButtons.initialize(controlScripts);
+  if(helpers&&!menuModeScript)menuModeScript=controlScripts->compileExpression("MenuMode");
+  controlsReady=helpers&&menuModeScript;
+  controlLease.configure(controlAPI,&controlButtons,"LukesItemBrowser");
+  nativeStatus(L"ControlsAPI",controlsReady?L"1":L"0");
+  if(controlsReady){nativeStatus(L"Error",L"");logLine("Supported player-control APIs ready; no controller polling hook installed.");}
+  else {
+   std::string error=helpers?"Cannot compile query: MenuMode":controlButtons.lastError();
+   logLine(error.c_str());nativeStatus(L"Error",wide(error).c_str());
+  }
+ }
+ DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+ bool foreground=pid==GetCurrentProcessId();
+ bool frames=lastFrameTick&&GetTickCount()-lastFrameTick.load()<=1500;
+ if(opened&&(!foreground||!frames||gameMenuActive()))closeBrowser();
+ if(!opened&&controlLease.active()&&(!foreground||!frames||((LONG)(GetTickCount()-blockUntil.load())>=0&&pad::allReleased()))){
+  if(controlLease.release())releaseBrowser();
+ }
+ if(controlsReady&&foreground&&frames)inputs();
+}
+extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSELoadInterface* nvse) {
+ // Resolve the public interface before installing any browser hooks.
+ controlAPI=nvse&&nvse->QueryInterface?(BrowserPlayerControls*)nvse->QueryInterface(10):nullptr;
+ controlScripts=nvse&&nvse->QueryInterface?(BrowserScriptAPI*)nvse->QueryInterface(6):nullptr;
+ auto messaging=nvse&&nvse->QueryInterface?(BrowserNVSEMessaging*)nvse->QueryInterface(BrowserMessagingInterface):nullptr;
+ if(!controlAPI||!controlAPI->disable||!controlAPI->enable||!controlScripts||!messaging||messaging->version<4||!nvse->GetPluginHandle){
+  logLine("Load rejected: supported player-control interface missing. Requires xNVSE 6.3.11 or newer.");return false;
+ }
  if(initialize(nullptr)!=0)return false;
+ if(!messaging->RegisterListener(nvse->GetPluginHandle(),"NVSE",browserNVSEMessage))
+  logLine("ERROR: could not register control service. Menu opening disabled.");
+ nativeStatus(L"ControllerGate",L"0");nativeStatus(L"ControlsAPI",L"0");
  // Runtime DLL remains loaded while its monitor and installed hooks are active.
  HMODULE pinned=nullptr;
  if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,(LPCWSTR)&hotkeyMonitor,&pinned)) {
@@ -711,6 +826,7 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const void*) {
  return true;
 }
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH){moduleHandle=instance;DisableThreadLibraryCalls(instance);}return TRUE;}
+
 
 
 

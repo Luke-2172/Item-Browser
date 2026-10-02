@@ -13,10 +13,11 @@ foreach ($line in Get-Content $iniPath) {
     elseif ($line -match '^([^;=]+)=(.*)$') { $ini["${section}:$($Matches[1])"] = $Matches[2] }
 }
 $expected = @{
+    'Controls:ControllerOpenDirection' = @(1,4,1)
     'Controls:FunctionKey' = @(1,24,11)
     'Controls:MouseSpeed' = @(0.25,5,1.6)
     'Display:BackgroundOpacity' = @(20,100,72)
-    'Display:RenderScale' = @(1,3,2)
+    'Display:RenderScale' = @(1,3,3)
     'Audio:MenuSounds' = @(0,1,1)
     'Audio:PickupSounds' = @(0,1,1)
     'Browser:ShowOverrides' = @(0,1,0)
@@ -35,10 +36,10 @@ foreach ($property in $m.submenus.'0'.options.PSObject.Properties) {
         if ($o.scale.valueMin -ne $expected[$key][0] -or $o.scale.valueMax -ne $expected[$key][1] -or $o.scale.valueIncrement -le 0) { throw "Range mismatch: $key" }
     } elseif ($o.type -ne 5) { throw "Unsupported option: $key" }
 }
-if ($seen.Count -ne 7) { throw 'Expected seven settings' }
+if ($seen.Count -ne 8) { throw 'Expected eight settings' }
 $json = Get-Content (Join-Path $package 'MCM/LukesItemBrowser.json') -Raw
 if ($json -match '"(?:call|callOpen|callClose|callLoop|snippet|console|iniPath)"') { throw 'Unexpected executable callback or path override' }
 if (Get-ChildItem $package -Recurse -File | Where-Object Extension -in '.esp','.esm') { throw 'ESP/ESM found in ESP-free package' }
 $runner = Get-Content (Join-Path $package 'NVSE/Plugins/scripts/ln_LukesItemBrowser.txt') -Raw
 if ($runner -match 'CompileScript\s+"[^"]*MCM|IsModLoaded') { throw 'Optional MCM dependency found in startup runner' }
-Write-Output 'PASS: ESP-free MCM metadata, seven shared settings, defaults, ranges and fixed INI path'
+Write-Output 'PASS: ESP-free MCM metadata, eight shared settings, defaults, ranges and fixed INI path'
