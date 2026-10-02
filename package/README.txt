@@ -1,4 +1,4 @@
-LUKE'S ITEM BROWSER - VERSION 1.0.1
+LUKE'S ITEM BROWSER - VERSION 1.0.2
 Fallout: New Vegas 1.4.0.525, 32-bit Windows
 
 FEATURES
@@ -118,7 +118,7 @@ Disable/remove the old LukesItemBrowserMCM.esp and MCM.gek/MCMReset.gek integrat
 For an existing custom INI, migrate Hotkey=122 to FunctionKey=11 (subtract 111).
 Do not merge with earlier builds: the DLL, scripts, folders and INI paths have all
 been renamed. Only enable one version. Reapply custom settings in LukesItemBrowser.ini.
-Native NVSE version is 101 (1.0.1).
+Native NVSE version is 102 (1.0.2).
 
 MENU SOUNDS
 Open: ui_vats_move.wav. Close: ui_vats_ready.wav.
@@ -131,4 +131,4 @@ Included zlib1.dll is a custom static wrapper built from the local MSYS2 libz.a;
 it is not the unmodified upstream DLL. License is in NVSE\Plugins\LukesItemBrowser.
 Reference styling supplied by the user; no game art was copied into the package.
 
-For 1.0.1 renderer recovery and failure diagnostics, see COMPATIBILITY.txt.
+For 1.0.2 renderer recovery and failure diagnostics, see COMPATIBILITY.txt.

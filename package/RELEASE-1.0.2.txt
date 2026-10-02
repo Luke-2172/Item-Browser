@@ -1,0 +1,17 @@
+Luke's Item Browser 1.0.2 - scrolling and rendering update
+
+- Cache the procedural backdrop at each render resolution.
+- Redraw and upload only the affected list when scrolling or dragging its scrollbar.
+- Ignore wheel movement outside lists and at a list boundary.
+- Accumulate high-resolution wheel input and preserve multiple wheel notches.
+- Composite at Present/PresentEx onto the backbuffer, never from an EndScene pass.
+- Restore render targets, depth surfaces and viewport, including failed binds.
+- Reduce closed-menu keyboard polling and redundant runtime status writes.
+- Keep the existing layout, font, background pattern and audio settings.
+
+Install as a replacement for 1.0 or 1.0.1; enable only one version.
+Dependencies are unchanged; MCM remains optional and ESP-free.
+
+Automated canvas, upload and state-restoration checks pass. Actual in-game
+scrolling, shadow flicker, device reset and graphics-wrapper tests remain manual.
+See PERFORMANCE.txt and COMPATIBILITY.txt for details and limitations.

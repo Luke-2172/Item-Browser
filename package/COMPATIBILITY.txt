@@ -1,4 +1,4 @@
-Luke's Item Browser 1.0.1 - compatibility and troubleshooting
+Luke's Item Browser 1.0.2 - compatibility and troubleshooting
 
 INSTALLATION
 Install the compiled mod ZIP, not the source ZIP. The archive's NVSE and MCM
@@ -8,9 +8,10 @@ Do not enable multiple versions at once. Old MCM identity ESPs are unnecessary.
 
 WHAT CHANGED
 This version intercepts the executable's directly imported Direct3DCreate9Ex.
-Captured devices get EndScene plus Present hooks, and captured Ex devices also
-get PresentEx and ResetEx hooks. Present is used only if EndScene was not observed
-since the previous presentation. Rendering still runs on the calling render thread.
+Captured devices get Present hooks; Ex devices also get PresentEx and ResetEx.
+The overlay draws only at presentation, explicitly selecting the backbuffer and
+restoring render targets, depth and viewport. EndScene only forwards to the game.
+Rendering still runs on the calling render thread.
 A separate Windows-only monitor detects the configured function key, logs it,
 and queues a short-lived request for the render thread. It never invokes game
 scripting or Direct3D functions. The plugin remains loaded for the process lifetime.
@@ -26,11 +27,11 @@ Data/config/LukesItemBrowserRuntime.ini
 nvse.log
 MO2 may place generated files in Overwrite.
 
-The browser log appends across launches. Find the most recent 1.0.1 startup.
+The browser log appends across launches. Find the most recent 1.0.2 startup.
 - No new startup: check NVSE loading, correct profile, archive layout and DLL.
 - Query rejected: the log explains the unsupported runtime/editor/version.
 - Factory hooks installed, but no captured device: renderer capture was bypassed.
-- Device captured, but no EndScene/Present: that device is not reaching our hooks.
+- Device captured, but no Present: that device is not reaching our hooks.
 - Hotkey monitor detected key press, but renderer warning: key arrived, drawing did not.
 - Hotkey detected; opening browser, then HRESULT error: send the exact error line.
 
@@ -41,7 +42,7 @@ Never download replacement system DLLs from random DLL websites.
 
 LIMITS
 Native Windows D3D9 is the intended baseline. Graphics wrappers and Wine/Proton
-remain unverified. The fallback still needs to capture a device through one of
+remain unverified. The renderer still needs to capture a device through one of
 the intercepted executable factory paths. It does not search arbitrary game memory
 for an existing device or override another mod's hooks after installation.
 Unsupported game editions and incorrect xNVSE installations still require fixing.

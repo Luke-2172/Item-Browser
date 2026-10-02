@@ -28,6 +28,10 @@ if errorlevel 1 exit /b 1
 cl /nologo /std:c++17 /EHsc /O2 /MT /W4 /GS /DUNICODE /D_UNICODE src\rendercheck.cpp /Fobuild\rendercheck.obj /Febuild\RenderCheck.exe /link /DYNAMICBASE /NXCOMPAT d3d9.lib dinput8.lib dxguid.lib user32.lib gdi32.lib /MACHINE:X86
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++17 /EHsc /O2 /MT /W4 /GS /DUNICODE /D_UNICODE src\hookcheck.cpp /Fobuild\hookcheck.obj /Febuild\HookCheck.exe /link /DYNAMICBASE /NXCOMPAT d3d9.lib dinput8.lib dxguid.lib user32.lib gdi32.lib /MACHINE:X86
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /O2 /MT /W4 /GS /DUNICODE /D_UNICODE src\perfcheck.cpp /Fobuild\perfcheck.obj /Febuild\PerfCheck.exe /link /DYNAMICBASE /NXCOMPAT d3d9.lib dinput8.lib dxguid.lib user32.lib gdi32.lib /MACHINE:X86
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /O2 /MT /W4 /GS /DUNICODE /D_UNICODE src\rendermock.cpp /Fobuild\rendermock.obj /Febuild\RenderMock.exe /link /DYNAMICBASE /NXCOMPAT d3d9.lib dinput8.lib dxguid.lib user32.lib gdi32.lib /MACHINE:X86
 exit /b %errorlevel%
 
 
