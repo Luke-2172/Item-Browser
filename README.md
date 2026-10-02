@@ -1,4 +1,4 @@
-# Luke's Item Browser 1.0.2
+# Luke's Item Browser 1.0.10
 
 An ESP-free Fallout: New Vegas item browser with plugin, item and detail columns,
 category filters, separate item/plugin searches and inventory addition through JIP LN.
@@ -6,10 +6,10 @@ F11 opens the browser by default. Open/close cues are `ui_vats_move` / `ui_vats_
 
 ## Install
 
-Players should install `Lukes-Item-Browser-FNV-1.0.2.zip` with Mod Organizer 2.
+Players should install `Lukes-Item-Browser-FNV-1.0.10.zip` with Mod Organizer 2.
 The archive root belongs in `Data`: it contains `NVSE` and `MCM`.
 See [player instructions](package/README.txt) for controls and limitations.
-Requires New Vegas 1.4.0.525, xNVSE 6.3.5+ and JIP LN 56.95+.
+Requires New Vegas 1.4.0.525, xNVSE 6.3.11+ and JIP LN 56.95+.
 
 The optional settings page requires [MCM](https://www.nexusmods.com/newvegas/mods/42507)
 and [MCM Extender 1.63+](https://github.com/Stentorious/MCMExtender), with their
@@ -34,7 +34,7 @@ pwsh -NoProfile -File .\package.ps1
 ```
 
 The native outputs are generated under `package/NVSE/Plugins`; developer executables
-are generated under `build`. Packaging writes `dist/Lukes-Item-Browser-FNV-1.0.2.zip`.
+are generated under `build`. Packaging writes `dist/Lukes-Item-Browser-FNV-1.0.10.zip`.
 No game assets or installed game directory are required to build or run these tests.
 Upload the contents of this source folder to GitHub. Generated files are ignored.
 
@@ -82,7 +82,7 @@ No Bethesda assets or MCM framework source is redistributed.
 No project-wide open-source license has been selected; the zlib license applies
 only to the third-party zlib material.
 
-## 1.0.2 rendering changes
+## 1.0.5 rendering changes
 
 The native version is 102. The backdrop is cached per resolution; scrolling
 redraws and uploads only the affected list. Wheel movement at a list boundary
@@ -95,3 +95,16 @@ See [performance and comparison notes](package/PERFORMANCE.txt) and
 [compatibility notes](package/COMPATIBILITY.txt). PerfCheck compares partial and
 full redraws pixel for pixel. RenderMock checks target restoration and partial
 texture upload bounds. These tests do not establish real GPU compatibility.
+
+See package/COMPATIBILITY-FIX.txt for this release's fixes and validation limits.
+
+## Bundled fonts
+This release uses Barlow Condensed Bold and Share Tech Mono, both SIL OFL. Fonts load from memory for MO2 support. See package/RELEASE-1.0.5.txt.
+
+
+## Pip-Boy colour and controller update
+See package/RELEASE-1.0.5.txt for the new controls, colour synchronisation, author credit and validation limits.
+
+
+## Supported control APIs (1.0.10)
+See package/RELEASE-1.0.10.txt for the controller-hook removal, xNVSE 6.3.11 requirement, restoration behaviour and shared JIP button-flag limitation. Existing DirectInput and renderer hooks remain.

@@ -1,0 +1,53 @@
+Luke's Item Browser 1.0.7 - Supported control APIs
+Author: luke2172
+
+INSTALL
+Replace the previous browser installation and restart the game. Update both
+browsers if both are installed. Do not keep the earlier DLL under another name.
+NEW MINIMUM: xNVSE 6.3.11 (the first release exposing the native player-controls
+interface). JIP LN 56.95+ remains required. MCM remains optional and ESP-less.
+
+INPUT COMPATIBILITY
+The controller polling patch from the previous release has been removed.
+No XInput/game controller thunk is patched and no JIP hook is replaced or chained.
+No JIP files are edited. The menu reads the controller through the Windows API.
+
+The public xNVSE player-control interface disables gameplay actions under a
+unique browser owner name. Closing removes that owner's restrictions, preserving
+restrictions belonging to other mods/quests. These flags are not saved.
+
+JIP's supported IsButtonDisabled/DisableButton/EnableButton and matching trigger
+commands cover Activate, pause, hotkeys and remapped trigger bindings. Existing
+disabled buttons/triggers are captured before opening; only newly disabled inputs
+are restored. The browsers cannot overlap while these inputs are being restored.
+Important API limitation: JIP button/trigger flags are global, without ownership.
+If another mod disables the SAME newly-disabled button while a browser is open,
+the API cannot distinguish its claim from ours. Pre-existing disables are preserved;
+concurrent ownership protection applies to xNVSE gameplay flags, not these JIP flags.
+
+Gameplay input locks are acquired before opening and restored after closing and
+controller release. Focus loss, missing rendering frames, loading, starting a new
+game and returning to the main menu trigger cleanup. Failed restoration is retried.
+Unsupported/missing APIs or failed helper compilation prevent opening instead of
+falling back to controller hooks. No game addresses are used by the new controls.
+
+Both keyboard/mouse and controller browsing use the gameplay control restrictions.
+Existing DirectInput hooks still capture mouse movement/scrolling and suppress
+keyboard/mouse input to gameplay. Existing Direct3D rendering hooks are unchanged.
+This update does not claim that the entire mod is hook-free.
+
+DIAGNOSTICS
+Native:ControlsAPI in the runtime INI should become 1. Native:ControllerGate is 0
+because the old controller gate is intentionally absent. The plugin log should say
+'Supported player-control APIs ready; no controller polling hook installed.'
+
+VALIDATION
+Clean x86 builds and automated regressions for independent gameplay owners,
+pre-existing button/trigger disables, failed acquisition/rollback, restoration
+retry, held/disconnected controllers and main-menu cleanup. Existing menu,
+rendering, security and package checks also pass. In-game script compilation,
+physical-controller behaviour and third-party mod combinations need manual testing.
+
+IMPLEMENTATION REFERENCES
+https://github.com/xNVSE/NVSE/blob/6.3.11/nvse/nvse/PluginAPI.h
+https://github.com/jazzisparis/JIP-LN-NVSE/blob/main/functions_ln/ln_fn_gamepad.h

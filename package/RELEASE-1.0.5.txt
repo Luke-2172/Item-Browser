@@ -1,0 +1,49 @@
+ITEM BROWSER 1.0.5
+Author: luke2172
+
+NEW
+- All browser pages match the game's Pip-Boy colour, including headings,
+  text, borders, selections, background pattern and mouse cursor.
+- Colour is read from the live uPipboyColor:Interface setting through xNVSE.
+  No JohnnyGuitar requirement is introduced. Theme.gek runs separately from
+  the gameplay bridge. Colour refresh takes approximately one second.
+- Menu title is ITEM BROWSER. Version and luke2172 appear at bottom right.
+- Prompts switch to Xbox input when controller navigation is used, and back
+  when the keyboard/mouse is used. Simply connecting a controller does not
+  force Xbox prompts. Stick drift inside the dead zone does not switch modes.
+
+CONTROLS
+Open/close: F11 / Back + D-pad Left
+D-pad / left stick: navigate controls and lists.
+A: select or activate the focused control.
+X: add/spawn the selected record; apply the selected actor value on Values.
+B: leave a text field, return from a subpage, or close the browser.
+LB / RB: move between columns. In Settings, move between controls.
+LT / RT: page the focused plugin, record or actor-value list.
+Start/Menu: cycle the browser's top-level pages.
+Y: focus search, or the numeric field on Actor Values.
+PC keyboard: type search text and exact numeric values. No on-screen keyboard.
+On Actor Values, left/right while focused on the number changes it by one.
+
+Controller opening direction is configurable in MCM or the mod INI:
+ControllerOpenDirection=1 Left, 2 Right, 3 Up, 4 Down. Hold Back plus that
+D-pad direction. Give the two browsers different directions.
+A plain Back press is forwarded to gameplay on release; this allows a held
+Back modifier to open the browser without also activating the Wait control.
+Only one browser opens at a time. Controller gameplay input is suppressed
+while it is open, and held inputs must return to neutral after closing.
+Keyboard opening and the existing item/actor actions remain available.
+
+INSTALL
+Replace the existing corresponding browser mod in MO2. Enable only one
+version of each browser. Update both browsers for shared controller behaviour.
+Include the bundled DLL, fonts, GECK functions and script runners together.
+Keep the existing xNVSE/JIP requirements. Optional MCM uses MCM Extender.
+Xbox-compatible XInput controller required for native controller input.
+
+VALIDATION
+Native x86 build, existing render/input/security checks, and controller tests
+covering dead zones, repeats, opening chords, held-input masking, ordinal
+XInput imports, hook forwarding, menu mutual exclusion, navigation, prompt
+switching and tinted rendering. Actual in-game/controller testing remains
+necessary. Existing third-party DLL compatibility cannot be guaranteed.

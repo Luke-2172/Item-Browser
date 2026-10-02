@@ -1,0 +1,26 @@
+Luke's Item Browser 1.0.9 - control helper initialization update
+
+The reported logs show successful renderer initialization and hotkey detection,
+but menu opening was blocked by failed control-helper compilation. Those logs
+did not identify the individual compiler error, so the exact cause is unconfirmed.
+
+Changes:
+- Wait for this game's script-bridge readiness handshake before compiling helpers.
+- Replace parameterized helper functions with constant, parameterless commands
+  and query expressions through the public xNVSE script API.
+- Cache successful helpers and retry failures up to three times per load/new game.
+- Log the specific failed query or command and publish it in Native:Error.
+- Retain the startup fix that ignores nested compilation notifications before locking.
+
+Requirements remain xNVSE 6.3.11+ and JIP LN 56.95+. No JIP executable or
+controller-hook-chain patch is introduced. Gameplay controls use the supported
+xNVSE interface; JIP button/trigger flags use its script commands. Previously
+disabled flags are preserved. JIP's flags are global: another mod disabling the
+same flag while this browser is open cannot be distinguished from our disable.
+See RELEASE-1.0.7.txt for the earlier compatibility changes.
+
+Validation: native build and automated controller/API-boundary regression tests.
+The script API in the regression test is simulated: actual Fallout script
+compilation, GPU rendering and physical-controller testing remain unverified.
+Install as a replacement for the earlier version, preserving your INI settings.
+If opening still fails, supply the new browser log and console compiler message.

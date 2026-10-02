@@ -1,0 +1,32 @@
+LukesItemBrowser 1.0.6 - Controller gameplay isolation
+Author: luke2172
+
+Replace the previous installation with this complete archive and restart the game.
+Update BOTH browsers if both are installed. Requirements are unchanged.
+
+FIX
+JIP replaces the game's controller polling thunk during DeferredInit and bypasses
+ordinary XInputGetState import hooks. The browser now chains that game-facing
+thunk once, on the first xNVSE main-loop callback, after deferred initialization.
+Only recognised relative/import jump thunks are patched. Existing targets are
+preserved, including the other browser. Unsupported targets produce a log warning.
+
+While the menu is open, gameplay receives neutral sticks, triggers and buttons.
+The menu reads the physical controller separately, so navigation still works.
+Closing suppresses held controls until that controller returns to neutral.
+An idle second controller cannot prematurely release this suppression.
+Input packet numbers reflect changes introduced by filtering, including opening
+while a stick is already held. Normal input resumes after closing and release.
+No quest control flags, save data, controller mappings or Windows settings change.
+
+DIAGNOSTICS
+The plugin log records 'Gameplay controller gate installed after plugin
+initialization.' Native:ControllerGate in the runtime INI should be 1.
+A value of 0 or a warning means attachment failed and needs investigation.
+
+VALIDATION
+Built as x86 native DLL. Regression tests exercise a vanilla import thunk and a
+JIP-style bypass, two filters in both installation orders, neutral gameplay state,
+independent menu polling, held-release suppression and packet transitions.
+Existing rendering, script/package and browser-specific checks are also run.
+These automated checks do not replace in-game testing with a physical controller.

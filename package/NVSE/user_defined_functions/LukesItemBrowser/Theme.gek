@@ -1,0 +1,16 @@
+int iColour
+int iRed
+int iGreen
+int iBlue
+begin Function {}
+    let iColour := (GetNumericIniSetting "uPipboyColor:Interface") / 256
+    let iRed := iColour / 65536
+    let iGreen := (iColour / 256) - (iRed * 256)
+    let iBlue := iColour - (iRed * 65536) - (iGreen * 256)
+    if (GetINIFloat "Theme:Red" "LukesItemBrowserRuntime.ini") != iRed || (GetINIFloat "Theme:Green" "LukesItemBrowserRuntime.ini") != iGreen || (GetINIFloat "Theme:Blue" "LukesItemBrowserRuntime.ini") != iBlue || (GetINIFloat "Theme:Session" "LukesItemBrowserRuntime.ini") != (GetINIFloat "Bridge:Session" "LukesItemBrowserRuntime.ini")
+    SetINIFloat "Theme:Red" iRed "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Theme:Green" iGreen "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Theme:Blue" iBlue "LukesItemBrowserRuntime.ini"
+    SetINIFloat "Theme:Session" (GetINIFloat "Bridge:Session" "LukesItemBrowserRuntime.ini") "LukesItemBrowserRuntime.ini"
+    endif
+end

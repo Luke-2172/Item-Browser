@@ -1,5 +1,6 @@
 #include "browser.cpp"
 int wmain(int argc,wchar_t** argv) {
+ loadMenuFonts(L"package/NVSE/Plugins/LukesItemBrowser/Fonts/");
  if(argc!=4&&argc!=5)return 2;settingsPage=argc==5;
  auto z=LoadLibraryW(argv[1]);inflateFn=(ib::Inflate)GetProcAddress(z,"uncompress");
  catalog=ib::readPlugin(argv[2],inflateFn);plugins={L"FalloutNV.esm",L"DeadMoney.esm",L"HonestHearts.esm",L"OldWorldBlues.esm",L"LonesomeRoad.esm",L"GunRunnersArsenal.esm"};
