@@ -2,14 +2,14 @@
 #include <iostream>
 int main() {
  moduleHandle=GetModuleHandleW(nullptr);
- WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=moduleHandle;wc.lpszClassName=L"OCIBRenderTest";RegisterClassW(&wc);
- auto hwnd=CreateWindowW(wc.lpszClassName,L"OCIB test",WS_POPUP,-32000,-32000,Width,Height,nullptr,nullptr,moduleHandle,nullptr);
+ WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=moduleHandle;wc.lpszClassName=L"LukesItemBrowserRenderTest";RegisterClassW(&wc);
+ auto hwnd=CreateWindowW(wc.lpszClassName,L"LukesItemBrowser test",WS_POPUP,-32000,-32000,Width,Height,nullptr,nullptr,moduleHandle,nullptr);
  if(initialize(nullptr)!=0)return 1;
  auto d3d=Direct3DCreate9(D3D_SDK_VERSION);if(!d3d)return 1;
  D3DPRESENT_PARAMETERS pp{};pp.Windowed=TRUE;pp.SwapEffect=D3DSWAPEFFECT_DISCARD;pp.hDeviceWindow=hwnd;pp.BackBufferWidth=Width;pp.BackBufferHeight=Height;pp.BackBufferFormat=D3DFMT_A8R8G8B8;
  IDirect3DDevice9* dev=nullptr;if(FAILED(d3d->CreateDevice(0,D3DDEVTYPE_HAL,hwnd,D3DCREATE_SOFTWARE_VERTEXPROCESSING,&pp,&dev)))return 2;
  bool hooked=(*(void***)dev)[42]==(void*)endHook;std::cout<<"Created device EndScene hooked="<<hooked<<"\n";if(!hooked)return 3;
- catalog.items={ib::Item{0x123,"WEAP","Render test pistol","OCIBTest",false}};plugins={L"Test.esm"};pluginIndex=0;filterPlugins();filterItems();opened=true;
+ catalog.items={ib::Item{0x123,"WEAP","Render test pistol","LukesItemBrowserTest",false}};plugins={L"Test.esm"};pluginIndex=0;filterPlugins();filterItems();opened=true;
  dev->Clear(0,nullptr,D3DCLEAR_TARGET,0xFF000000,1,0);if(FAILED(dev->BeginScene()))return 4;
  dev->SetRenderState(D3DRS_FILLMODE,D3DFILL_WIREFRAME);draw(dev);DWORD state=0;dev->GetRenderState(D3DRS_FILLMODE,&state);if(state!=D3DFILL_WIREFRAME)return 5;
  if(FAILED(dev->EndScene()))return 6;

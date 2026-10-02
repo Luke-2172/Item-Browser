@@ -1,4 +1,4 @@
-# Luke's Item Browser 1.0.1
+# Luke's Item Browser 1.0.2
 
 An ESP-free Fallout: New Vegas item browser with plugin, item and detail columns,
 category filters, separate item/plugin searches and inventory addition through JIP LN.
@@ -6,7 +6,7 @@ F11 opens the browser by default. Open/close cues are `ui_vats_move` / `ui_vats_
 
 ## Install
 
-Players should install `Lukes-Item-Browser-FNV-1.0.1.zip` with Mod Organizer 2.
+Players should install `Lukes-Item-Browser-FNV-1.0.2.zip` with Mod Organizer 2.
 The archive root belongs in `Data`: it contains `NVSE` and `MCM`.
 See [player instructions](package/README.txt) for controls and limitations.
 Requires New Vegas 1.4.0.525, xNVSE 6.3.5+ and JIP LN 56.95+.
@@ -34,7 +34,7 @@ pwsh -NoProfile -File .\package.ps1
 ```
 
 The native outputs are generated under `package/NVSE/Plugins`; developer executables
-are generated under `build`. Packaging writes `dist/Lukes-Item-Browser-FNV-1.0.1.zip`.
+are generated under `build`. Packaging writes `dist/Lukes-Item-Browser-FNV-1.0.2.zip`.
 No game assets or installed game directory are required to build or run these tests.
 Upload the contents of this source folder to GitHub. Generated files are ignored.
 
@@ -82,13 +82,16 @@ No Bethesda assets or MCM framework source is redistributed.
 No project-wide open-source license has been selected; the zlib license applies
 only to the third-party zlib material.
 
-## 1.0.1 rendering changes
+## 1.0.2 rendering changes
 
-See [compatibility notes](package/COMPATIBILITY.txt) for the new factory interception,
-Present/PresentEx fallback, ResetEx handling, hotkey monitor and allocation fallback.
-The native version is 101. The automatic harness now checks independent device
-callback chains, Ex callback forwarding, fallback-frame detection, texture
-downsizing, terminal allocation failure and expiration of queued hotkey requests.
-The monitor starts only in NVSEPlugin_Load; standalone initialize() tests do not
-start a persistent background thread. The runtime DLL pins itself before starting
-the monitor. No graphics wrappers are bundled or claimed to be fully supported.
+The native version is 102. The backdrop is cached per resolution; scrolling
+redraws and uploads only the affected list. Wheel movement at a list boundary
+and outside either list does no redraw work. Sub-notch input accumulates.
+The overlay is composited once per Present/PresentEx, explicitly onto the
+backbuffer. EndScene callbacks only forward, avoiding offscreen/shadow passes.
+Render targets, depth surfaces and viewport are restored even after a bind failure.
+
+See [performance and comparison notes](package/PERFORMANCE.txt) and
+[compatibility notes](package/COMPATIBILITY.txt). PerfCheck compares partial and
+full redraws pixel for pixel. RenderMock checks target restoration and partial
+texture upload bounds. These tests do not establish real GPU compatibility.

@@ -1,4 +1,4 @@
-Luke's Item Browser 1.0.1 - scoped security and robustness review
+Luke's Item Browser 1.0.2 - scoped security and robustness review
 Reviewed 1 October 2026
 
 This is a source review and targeted testing, not an independent security audit
@@ -65,8 +65,10 @@ https://github.com/Stentorious/MCMExtender/wiki/JSON-Structure-Guide
 https://www.nexusmods.com/newvegas/mods/42507
 https://geckwiki.com/index.php/Form_Type_IDs
 
-1.0.1 ADDENDUM
-Renderer fallback and allocation failure paths received targeted mock tests.
+1.0.2 ADDENDUM
+Allocation failure paths received targeted mock tests. Partial redraws and texture
+uploads are checked for exact bounds and pixel equivalence. Backbuffer binding
+restores render targets, depth and viewport on success and failed binds in mocks.
 Graphics callbacks preserve separate original functions per captured device table.
 The hotkey worker calls Windows input/file APIs only and hands off via atomics;
 Direct3D and game scripting are not called from that worker. DLL pinning prevents

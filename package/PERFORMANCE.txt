@@ -1,0 +1,56 @@
+Luke's Item Browser 1.0.2 - performance and menu comparison
+
+DOES IT NEED TO DRAW EVERY FRAME?
+The game replaces its frame continuously. While open, the overlay must be
+composited onto each displayed frame. Its text, background and texture do not
+need rebuilding every frame. An unchanged open menu now reuses its texture;
+the menu and cursor use two small draw calls. State capture/restoration still
+runs each displayed frame. The game continues running behind the menu.
+
+SCROLLING
+Previously a wheel event invalidated the entire CPU canvas, including expensive
+per-pixel procedural backdrop and alpha work, even when the list could not move.
+The backdrop is now cached per resolution. List offsets invalidate only their
+list rectangle, including its scrollbar. Only that rectangle is copied and
+uploaded. Full layout changes still redraw the full canvas. Cache memory and a
+system-memory upload surface trade some additional memory for less repeated work.
+
+A local optimized x86 benchmark at render scale 2, with 100 fixture items,
+measured approximately 11.6 ms for a full CACHED canvas redraw and 2.1 ms for an
+item-list-only redraw (20 iterations each). This is CPU canvas time, not game
+frame time, and is not a benchmark against the old uncached release.
+Item-list upload is 2,189,152 bytes versus 12,544,000 for the full texture:
+about 82.5 percent fewer bytes. Driver costs and hardware performance vary.
+
+FLICKER
+The old EndScene hook could draw on whichever render target the game had bound,
+including an offscreen pass. The new path draws only from Present/PresentEx,
+binds the primary backbuffer, detaches extra render targets/depth, then restores
+all those bindings and the viewport. Ordinary render state uses a state block.
+This corrects a plausible cause of shadow contamination or repeated blending;
+it does not prove that this was the user's observed flicker without game testing.
+
+OTHER MENU IMPLEMENTATIONS REVIEWED
+- Installed MCM XML templates and MCM Extender MenuReset.gek use native UI tiles
+  and targeted UI property updates (SetUIFloat/SetMCMFloatMass), leaving rendering
+  to the engine. Extender's JSON guide describes its declarative menu settings.
+  https://github.com/Stentorious/MCMExtender/wiki/JSON-Structure-Guide
+- OX Toolkit's author's published description describes an XML menu/preset system
+  for New Vegas Reloaded. This is an architectural comparison; its renderer source
+  was not inspected. The current page is hidden and points to MUI Revisited.
+  https://www.nexusmods.com/newvegas/mods/83277
+- Dear ImGui's official D3D9 backend (a library, not itself a New Vegas mod) draws
+  per-frame UI geometry, reuses textures, and captures/restores graphics state.
+  https://github.com/ocornut/imgui/blob/master/backends/imgui_impl_dx9.cpp
+
+The useful shared principle is to separate UI content updates from per-frame
+composition. This release applies that principle without changing the browser
+into an engine XML menu or adding another runtime framework.
+
+VALIDATION
+PerfCheck: partial redraw equals full redraw pixel for pixel; outside pixels
+unchanged; cached backdrop reused; no-op wheel input; sub-notch accumulation.
+RenderMock: explicit backbuffer selection; MRT/depth/viewport restoration on
+success and failed bind; exact partial upload rectangle and byte count.
+Existing parser, MCM, configuration and hook-chain regression checks also run.
+Real GPU, DXVK/ENB/ReShade, Alt-Tab and in-game tests remain necessary.

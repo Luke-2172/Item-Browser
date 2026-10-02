@@ -33,6 +33,10 @@ static std::string status="Select a plugin to browse items introduced by that fi
 static std::atomic<bool> loading{false};
 static int pluginIndex=-1,pluginScroll=0,itemScroll=0,selected=-1,category=0,focus=0;
 static bool showOverrides=false,settingsPage=false,dirty=true;
+static unsigned listDirty=0;
+static std::vector<uint32_t> backdrop;
+static int backdropScale=0;
+static uint64_t backdropBuilds=0,canvasBuilds=0,listBuilds=0;
 static int backgroundOpacity=72,dragScroll=0;
 static float mouseSpeed=1.6f,dragOffset=0;
 static bool menuSounds=true,pickupSounds=true;
@@ -55,6 +59,8 @@ static HDC canvas;
 static HBITMAP bitmap;
 static void* pixels;
 static IDirect3DTexture9* texture=nullptr;
+static IDirect3DSurface9* uploadSurface=nullptr;
+static bool textureReady=false;
 static IDirect3DDevice9* renderDevice=nullptr;
 static ib::Inflate inflateFn=nullptr;
 static std::atomic<bool> frameSeen{false},inputReady{false};
@@ -170,8 +176,11 @@ static void config() {
  if(speed!=mouseSpeed||opacity!=backgroundOpacity||menu!=menuSounds||pickup!=pickupSounds||key!=hotkey)dirty=true;
  mouseSpeed=speed;backgroundOpacity=opacity;menuSounds=menu;pickupSounds=pickup;hotkey=key;
  if(overrides!=showOverrides){showOverrides=overrides;filterItems();}
- nativeStatus(L"PickupSounds",pickupSounds?L"1":L"0");
- if(!bridgePath.empty())nativeStatus(L"Hotkey",(L"F"+std::to_wstring(hotkey-VK_F1+1)).c_str());
+ if(!bridgePath.empty()) {
+  static int reportedPickup=-1;static UINT reportedKey=0;
+  if(reportedPickup!=(int)pickupSounds){nativeStatus(L"PickupSounds",pickupSounds?L"1":L"0");reportedPickup=(int)pickupSounds;}
+  if(reportedKey!=hotkey){nativeStatus(L"Hotkey",(L"F"+std::to_wstring(hotkey-VK_F1+1)).c_str());reportedKey=hotkey;}
+ }
 }
 static void requestItem() { dirty=true;
  if(loading||selected<0||selected>=(int)visible.size()||pluginIndex<0||pluginIndex>=(int)plugins.size())return;
@@ -227,7 +236,9 @@ static void panel(int x,int w,const char* title) {
  label(x+10,154,w-20,30,title,RGB(248,188,79));
  fill(x+1,185,w-2,1,RGB(173,126,48));
 }
-static void drawCanvas() {
+static void buildBackdrop() {
+ if(backdropScale==renderScale&&!backdrop.empty())return;
+ ++backdropBuilds;
  // Soft phosphor bands with irregular luminance, not a repeating square grid.
  fill(0,0,Width,Height,RGB(0,0,0));
  fill(10,10,Width-24,Height-24,RGB(9,10,9));
@@ -255,6 +266,43 @@ static void drawCanvas() {
    backgroundPixels[py*rasterWidth()+px]=(shade<<16)|(shade<<8)|shade;
   }
  }
+ backdrop.assign(backgroundPixels,backgroundPixels+(size_t)rasterWidth()*rasterHeight());backdropScale=renderScale;
+}
+static void drawLists(unsigned mask) {
+ for(int row=0;row<ListRows;++row) {
+  int p=pluginScroll+row,y=ListTop+row*RowHeight;
+  if((mask&1)&&p<(int)filteredPlugins.size()) {int idx=filteredPlugins[p];if(idx==pluginIndex){fill(27,y,310,28,RGB(57,44,22));border(27,y,310,28,RGB(241,183,80));}text(37,y,290,28,plugins[idx]);}
+  int item=itemScroll+row;
+  if((mask&2)&&item<(int)visible.size()) {const auto& entry=catalog.items[visible[item]];if(item==selected){fill(369,y,313,28,RGB(57,44,22));border(369,y,313,28,RGB(241,183,80));}label(379,y,293,28,entry.name);}
+ }
+ if(mask&1)scrollbar(340,pluginScroll,(int)filteredPlugins.size());
+ if(mask&2){scrollbar(686,itemScroll,(int)visible.size());if(loading)label(379,244,295,30,"Reading plugin...");else if(pluginIndex>=0&&visible.empty())label(379,244,295,30,"No matching items.");}
+}
+static void applyAlpha(int left,int top,int right,int bottom) {
+ GdiFlush();auto p=(uint32_t*)pixels;unsigned lut[256];const unsigned base=backgroundOpacity*255/100;
+ for(unsigned i=0;i<256;++i)lut[i]=(base+(255-base)*std::min(i,180u)/180)<<24;
+ for(int y=top;y<bottom;++y)for(int x=left;x<right;++x){
+  size_t i=(size_t)y*rasterWidth()+x;uint32_t c=p[i];
+  if(x>=7*renderScale&&x<(Width-13)*renderScale&&y>=7*renderScale&&y<(Height-13)*renderScale){
+   unsigned b=std::max({c&255,(c>>8)&255,(c>>16)&255});p[i]=(c&0xFFFFFF)|lut[b];
+  }else {
+   float lx=x/(float)renderScale,ly=y/(float)renderScale;
+   float dx=std::max({13.f-lx,0.f,lx-(Width-13.f)}),dy=std::max({13.f-ly,0.f,ly-(Height-13.f)});
+   p[i]=(unsigned)(115.f*std::max(0.f,1.f-std::max(dx,dy)/12.f))<<24;
+  }
+ }
+}
+static void redrawLists(unsigned mask) {
+ ++listBuilds;GdiFlush();auto p=(uint32_t*)pixels;
+ for(unsigned bit:{1u,2u})if(mask&bit){
+  int left=(bit==1?27:365)*renderScale,right=(bit==1?353:702)*renderScale;
+  int top=ListTop*renderScale,bottom=(ListTop+ListHeight)*renderScale;
+  for(int y=top;y<bottom;++y){size_t offset=(size_t)y*rasterWidth()+left;memcpy(p+offset,backdrop.data()+offset,(right-left)*sizeof(uint32_t));}
+  drawLists(bit);applyAlpha(left,top,right,bottom);
+ }
+}
+static void drawCanvas() {
+ ++canvasBuilds;buildBackdrop();GdiFlush();memcpy(pixels,backdrop.data(),backdrop.size()*sizeof(uint32_t));
  // Inset amber frame leaves transparent room for a real external drop shadow.
  border(7,7,Width-20,Height-20,RGB(65,45,16));
  border(8,8,Width-22,Height-22,RGB(143,96,29));
@@ -280,15 +328,7 @@ static void drawCanvas() {
   const auto& searchText=searchScope==1?pluginQuery:query;
   button(788,104,301,31,searchText.empty()?(searchScope==1?"Search plugins...":"Search items..."):searchText,focus!=0);
   panel(26,328,"PLUGINS");panel(364,339,"ITEMS");panel(713,378,"ITEM DETAILS");
-  for(int row=0;row<ListRows;++row) {
-   int p=pluginScroll+row,y=ListTop+row*RowHeight;
-   if(p<(int)filteredPlugins.size()) {int idx=filteredPlugins[p];if(idx==pluginIndex){fill(27,y,310,28,RGB(57,44,22));border(27,y,310,28,RGB(241,183,80));}text(37,y,290,28,plugins[idx]);}
-   int item=itemScroll+row;
-   if(item<(int)visible.size()) {const auto& entry=catalog.items[visible[item]];if(item==selected){fill(369,y,313,28,RGB(57,44,22));border(369,y,313,28,RGB(241,183,80));}label(379,y,293,28,entry.name);}
-  }
-  scrollbar(340,pluginScroll,(int)filteredPlugins.size());scrollbar(686,itemScroll,(int)visible.size());
-  if(loading)label(379,244,295,30,"Reading plugin...");
-  else if(pluginIndex>=0&&visible.empty())label(379,244,295,30,"No matching items.");
+  drawLists(3);
   if(selected>=0&&selected<(int)visible.size()) {
    const auto& i=catalog.items[visible[selected]];char id[16];sprintf_s(id,"%08X",i.id);
    std::string name=i.name;for(auto& c:name)c=(char)toupper((unsigned char)c);label(726,198,350,44,name,RGB(250,194,90),detailFont);
@@ -306,20 +346,7 @@ static void drawCanvas() {
  if(!settingsPage)shortcut(609,60,"ENTER","ADD ITEM");shortcut(810,45,"F"+std::to_string(hotkey-VK_F1+1),"CLOSE");shortcut(973,45,"ESC","BACK");
  label(28,624,560,29,settingsPage?"Preferences apply immediately":"Double-click an item to add it",RGB(173,139,84),smallFont);
  label(28,658,1058,25,status,RGB(200,162,103),smallFont);
- GdiFlush();auto p=(uint32_t*)pixels;
- const unsigned baseAlpha=backgroundOpacity*255/100;
- for(int y=0;y<rasterHeight();++y)for(int x=0;x<rasterWidth();++x){
-  int i=y*rasterWidth()+x;auto c=p[i];float lx=x/(float)renderScale,ly=y/(float)renderScale;
-  bool inFrame=lx>=7&&lx<Width-13&&ly>=7&&ly<Height-13;
-  unsigned brightness=std::max({c&255,(c>>8)&255,(c>>16)&255});
-  unsigned alpha=baseAlpha+(255-baseAlpha)*std::min(brightness,180u)/180;
-  if(!inFrame) {
-   // Shadow offset down/right, fading to fully transparent at the outer edges.
-   float dx=std::max({13.f-lx,0.f,lx-(Width-13.f)}),dy=std::max({13.f-ly,0.f,ly-(Height-13.f)});
-   alpha=(unsigned)(115.f*std::max(0.f,1.f-std::max(dx,dy)/12.f));c=0;
-  }
-  p[i]=(c&0xFFFFFF)|(alpha<<24);
- }
+ applyAlpha(0,0,rasterWidth(),rasterHeight());
 }
 static void menuSound(int event) {if(menuSounds&&!bridgePath.empty())WritePrivateProfileStringW(L"Audio",L"Menu",std::to_wstring(event).c_str(),bridgePath.c_str());}
 static void closeBrowser() {opened=false;blockUntil=GetTickCount()+250;focus=0;dragScroll=0;lastClickItem=-1;menuSound(2);}
@@ -332,7 +359,8 @@ static void savePreferences() {
 }
 static void dragScrollbar() {
  int count=dragScroll==1?(int)filteredPlugins.size():(int)visible.size();auto& scroll=dragScroll==1?pluginScroll:itemScroll;
- int travel=ListHeight-scrollThumb(count);if(travel>0)scroll=std::clamp((int)((cursorY-ListTop-dragOffset)*(count-ListRows)/travel+0.5f),0,count-ListRows);dirty=true;
+ int before=scroll;int travel=ListHeight-scrollThumb(count);if(travel>0)scroll=std::clamp((int)((cursorY-ListTop-dragOffset)*(count-ListRows)/travel+0.5f),0,count-ListRows);
+ if(scroll!=before){listDirty|=dragScroll==1?1:2;lastClickItem=-1;}
 }
 static void click() {
  dirty=true;
@@ -369,21 +397,30 @@ static void click() {
   else {lastClickItem=p;lastClickTime=now;lastClickX=cursorX;lastClickY=cursorY;}
  }
 }
+static void scrollWheel(long delta) {
+ static long remainder=0;static unsigned previousTarget=0;
+ unsigned target=settingsPage?0:inside(27,ListTop,323,ListHeight)?1:inside(369,ListTop,329,ListHeight)?2:0;
+ if(target!=previousTarget){remainder=0;previousTarget=target;}
+ if(!target)return;
+ long total=remainder+std::clamp(delta,-12000L,12000L);int steps=(int)(total/WHEEL_DELTA);remainder=total%WHEEL_DELTA;
+ auto& offset=target==1?pluginScroll:itemScroll;int count=(int)(target==1?filteredPlugins.size():visible.size());
+ int next=std::clamp(offset-steps*3,0,std::max(0,count-ListRows));
+ if(next!=offset){offset=next;listDirty|=target;lastClickItem=-1;}
+}
 static void inputs() {
  static DWORD lastConfigPoll=0;
  if(GetTickCount()-lastConfigPoll>=1000){lastConfigPoll=GetTickCount();config();}
  DWORD process=0; GetWindowThreadProcessId(GetForegroundWindow(),&process);
  if(process!=GetCurrentProcessId()) {if(opened)closeBrowser();return;}
- bool pressed[256]{}; for(int k=0;k<256;++k) {bool down=(GetAsyncKeyState(k)&0x8000)!=0;pressed[k]=down&&!previousKeys[k];previousKeys[k]=down;}
+ bool pressed[256]{};
+ if(opened||!monitorActive)for(int k=0;k<256;++k) {bool down=(GetAsyncKeyState(k)&0x8000)!=0;pressed[k]=down&&!previousKeys[k];previousKeys[k]=down;}
  bool queued=consumeToggle(GetTickCount());
  if(queued||(!monitorActive&&pressed[hotkey])) {if(opened) closeBrowser();else {logLine("Hotkey detected; opening browser.");config();if(!loading){scanPlugins();pluginIndex=-1;catalog={};filterItems();}opened=true;dirty=true;settingsPage=false;lastClickItem=-1;menuSound(1);cursorX=560;cursorY=350;mouseDX=0;mouseDY=0;wheelDelta=0;}return;}
  if(!opened)return;
  if(pressed[VK_ESCAPE]) {if(settingsPage){settingsPage=false;dirty=true;}else closeBrowser();return;}
  cursorX=std::clamp(cursorX+mouseDX.exchange(0)*mouseSpeed,0.f,(float)Width-1); cursorY=std::clamp(cursorY+mouseDY.exchange(0)*mouseSpeed,0.f,(float)Height-1);
  if(pressed[VK_LBUTTON])click();if(!previousKeys[VK_LBUTTON])dragScroll=0;else if(dragScroll)dragScrollbar();
- auto wheel=wheelDelta.exchange(0); int direction=wheel>0?-3:wheel<0?3:0;
- if(direction){dirty=true;lastClickItem=-1;} if(!settingsPage&&inside(27,ListTop,323,ListHeight))pluginScroll=std::clamp(pluginScroll+direction,0,std::max(0,(int)filteredPlugins.size()-ListRows));
- else if(!settingsPage&&inside(369,ListTop,329,ListHeight))itemScroll=std::clamp(itemScroll+direction,0,std::max(0,(int)visible.size()-ListRows));
+ auto wheel=wheelDelta.exchange(0);if(wheel)scrollWheel(wheel);
  if(pressed[VK_TAB]&&!settingsPage){searchScope=searchScope==1?2:1;focus=searchScope;dirty=true;}
  if(pressed[VK_RETURN]&&!focus&&!settingsPage)requestItem();
  static DWORD lastStatusPoll=0;
@@ -440,7 +477,7 @@ static RendererHooks hooksFor(IDirect3DDevice9* dev) {
  return i==rendererHooks.end()?RendererHooks{}:i->second;
 }
 static IDirect3DDevice9* sceneDevice=nullptr;
-static void releaseTexture() {dirty=true;if(texture){texture->Release();texture=nullptr;}renderDevice=nullptr;}
+static void releaseTexture() {dirty=true;textureReady=false;if(uploadSurface){uploadSurface->Release();uploadSurface=nullptr;}if(texture){texture->Release();texture=nullptr;}renderDevice=nullptr;}
 static HRESULT STDMETHODCALLTYPE resetHook(IDirect3DDevice9* dev,D3DPRESENT_PARAMETERS* p) {
  auto h=hooksFor(dev);{std::lock_guard<std::mutex> guard(catalogMutex);if(renderDevice==dev)releaseTexture();sceneDevice=nullptr;}
  HRESULT hr=h.reset?h.reset(dev,p):D3DERR_INVALIDCALL;if(FAILED(hr))graphicsError("Reset",hr);else logLine("D3D9 Reset succeeded; menu texture will be recreated.");return hr;
@@ -453,7 +490,7 @@ static bool ensureTexture(IDirect3DDevice9* dev) {
  if(texture)return true;
  if((!canvas||!pixels||!font||!titleFont||!smallFont||!detailFont)&&!createCanvas())return false;
  while(true) {
-  HRESULT hr=dev->CreateTexture(rasterWidth(),rasterHeight(),1,D3DUSAGE_DYNAMIC,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&texture,nullptr);
+  HRESULT hr=dev->CreateTexture(rasterWidth(),rasterHeight(),1,0,D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&texture,nullptr);
   if(SUCCEEDED(hr))return true;
   graphicsError("CreateTexture",hr);
   if(hr==D3DERR_DEVICELOST||renderScale<=1)return false;
@@ -463,12 +500,29 @@ static bool ensureTexture(IDirect3DDevice9* dev) {
  }
 }
 struct Vertex {float x,y,z,rhw;DWORD color;float u,v;};
+static HRESULT uploadCanvas(IDirect3DDevice9* dev,bool full,unsigned mask) {
+ HRESULT hr;
+ if(!uploadSurface){hr=dev->CreateOffscreenPlainSurface(rasterWidth(),rasterHeight(),D3DFMT_A8R8G8B8,D3DPOOL_SYSTEMMEM,&uploadSurface,nullptr);if(FAILED(hr))return hr;}
+ IDirect3DSurface9* destination=nullptr;hr=texture->GetSurfaceLevel(0,&destination);if(FAILED(hr))return hr;
+ for(unsigned bit:{1u,2u}) {
+  if(!full&&!(mask&bit))continue;
+  RECT r=full?RECT{0,0,rasterWidth(),rasterHeight()}:RECT{(bit==1?27:365)*renderScale,ListTop*renderScale,(bit==1?353:702)*renderScale,(ListTop+ListHeight)*renderScale};
+  D3DLOCKED_RECT locked{};hr=uploadSurface->LockRect(&locked,&r,0);if(FAILED(hr))break;
+  for(int y=r.top;y<r.bottom;++y)memcpy((char*)locked.pBits+(y-r.top)*locked.Pitch,(uint32_t*)pixels+(size_t)y*rasterWidth()+r.left,(r.right-r.left)*4);
+  hr=uploadSurface->UnlockRect();if(FAILED(hr))break;
+  POINT p{r.left,r.top};hr=dev->UpdateSurface(uploadSurface,&r,destination,&p);if(FAILED(hr)||full)break;
+ }
+ destination->Release();return hr;
+}
 static void draw(IDirect3DDevice9* dev) {
  if(!opened)return;
  if(renderDevice!=dev){releaseTexture();renderDevice=dev;}
  if(!ensureTexture(dev)) {closeBrowser();return;}
- if(dirty) {drawCanvas(); D3DLOCKED_RECT locked{}; HRESULT hr=texture->LockRect(0,&locked,nullptr,D3DLOCK_DISCARD);if(FAILED(hr)){graphicsError("LockRect",hr);closeBrowser();return;}
- for(int y=0;y<rasterHeight();++y)memcpy((char*)locked.pBits+y*locked.Pitch,(char*)pixels+y*rasterWidth()*4,rasterWidth()*4);texture->UnlockRect(0);dirty=false;}
+ if(dirty||listDirty||!textureReady) {
+  bool full=dirty||!textureReady;if(full)drawCanvas();else redrawLists(listDirty);
+  HRESULT hr=uploadCanvas(dev,full,listDirty);if(FAILED(hr)){graphicsError("Upload canvas",hr);closeBrowser();return;}
+  textureReady=true;dirty=false;listDirty=0;
+ }
  IDirect3DStateBlock9* block=nullptr;HRESULT stateHR=dev->CreateStateBlock(D3DSBT_ALL,&block);if(FAILED(stateHR)){graphicsError("CreateStateBlock",stateHR);closeBrowser();return;}
  stateHR=block->Capture();if(FAILED(stateHR)){graphicsError("Capture state",stateHR);block->Release();closeBrowser();return;}
  D3DVIEWPORT9 viewport{}; dev->GetViewport(&viewport); float scale=std::min(viewport.Width/(float)(Width+30),viewport.Height/(float)(Height+30));
@@ -491,31 +545,49 @@ static void draw(IDirect3DDevice9* dev) {
  Vertex arrow[]={{cx,cy,0,1,0xFFFFC350,0,0},{cx+18*scale,cy+18*scale,0,1,0xFFFFC350,0,0},{cx+7*scale,cy+18*scale,0,1,0xFFFFC350,0,0},{cx,cy+25*scale,0,1,0xFFFFC350,0,0}};
  dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN,2,arrow,sizeof(Vertex));block->Apply();block->Release();
 }
-static HRESULT STDMETHODCALLTYPE endHook(IDirect3DDevice9* dev) {
- D3DDEVICE_CREATION_PARAMETERS cp{};dev->GetCreationParameters(&cp);
- if(cp.hFocusWindow && IsWindowVisible(cp.hFocusWindow)) {
-  if(!frameSeen.exchange(true)){nativeStatus(L"Frames",L"1");logLine("Game EndScene observed; renderer initialised.");}
-  gameWindow=cp.hFocusWindow;
-  lastFrameTick=GetTickCount();std::lock_guard<std::mutex> guard(catalogMutex);sceneDevice=dev;inputs();draw(dev);
+// Render targets/depth surfaces are not saved by a D3D9 state block.
+// Use an explicit scope so an offscreen pass can never receive the menu.
+class BackbufferScope {
+ IDirect3DDevice9* dev;IDirect3DSurface9* targets[4]{};IDirect3DSurface9* depth=nullptr;IDirect3DSurface9* back=nullptr;
+ D3DVIEWPORT9 viewport{};DWORD count=0;bool saved=false;
+public:
+ explicit BackbufferScope(IDirect3DDevice9* d):dev(d){}
+ HRESULT bind() {
+  D3DCAPS9 caps{};HRESULT hr=dev->GetDeviceCaps(&caps);if(FAILED(hr))return hr;
+  count=std::min<DWORD>(4,caps.NumSimultaneousRTs);if(!count)return D3DERR_INVALIDCALL;
+  hr=dev->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back);if(FAILED(hr))return hr;
+  for(DWORD i=0;i<count;++i){hr=dev->GetRenderTarget(i,&targets[i]);if(FAILED(hr)&&!(i>0&&hr==D3DERR_NOTFOUND))return hr;}
+  hr=dev->GetDepthStencilSurface(&depth);if(FAILED(hr)&&hr!=D3DERR_NOTFOUND)return hr;
+  hr=dev->GetViewport(&viewport);if(FAILED(hr))return hr;
+  saved=true;
+  hr=dev->SetDepthStencilSurface(nullptr);if(FAILED(hr))return hr;
+  for(DWORD i=1;i<count;++i){hr=dev->SetRenderTarget(i,nullptr);if(FAILED(hr))return hr;}
+  hr=dev->SetRenderTarget(0,back);if(FAILED(hr))return hr;
+  D3DSURFACE_DESC desc{};hr=back->GetDesc(&desc);if(FAILED(hr))return hr;
+  D3DVIEWPORT9 full{0,0,desc.Width,desc.Height,0.f,1.f};return dev->SetViewport(&full);
  }
+ ~BackbufferScope() {
+  if(saved){dev->SetDepthStencilSurface(nullptr);dev->SetRenderTarget(0,targets[0]);for(DWORD i=1;i<count;++i)dev->SetRenderTarget(i,targets[i]);dev->SetDepthStencilSurface(depth);dev->SetViewport(&viewport);}
+  for(auto p:targets)if(p)p->Release();if(depth)depth->Release();if(back)back->Release();
+ }
+};
+static HRESULT STDMETHODCALLTYPE endHook(IDirect3DDevice9* dev) {
+ // EndScene may finish a shadow/offscreen pass. Never draw or consume input here.
  auto h=hooksFor(dev);return h.end?h.end(dev):D3DERR_INVALIDCALL;
 }
 static void renderForPresent(IDirect3DDevice9* dev) {
- auto h=hooksFor(dev);
- bool finishScene=false;
- D3DDEVICE_CREATION_PARAMETERS cp{};dev->GetCreationParameters(&cp);
- if(cp.hFocusWindow&&IsWindowVisible(cp.hFocusWindow)) {
-  lastFrameTick=GetTickCount();std::lock_guard<std::mutex> guard(catalogMutex);
-  if(sceneDevice!=dev) {
-   if(!frameSeen.exchange(true)){logLine("Present fallback observed; renderer initialised.");nativeStatus(L"Frames",L"1");}
-   gameWindow=cp.hFocusWindow;inputs();
-   if(opened){HRESULT hr=dev->BeginScene();if(SUCCEEDED(hr)){draw(dev);finishScene=true;}else {graphicsError("Present fallback BeginScene",hr);closeBrowser();}}
-  }
-  sceneDevice=nullptr;
- }
- if(finishScene&&h.end)h.end(dev);
-}
-static thread_local bool insidePresent=false;
+ auto h=hooksFor(dev);D3DDEVICE_CREATION_PARAMETERS cp{};dev->GetCreationParameters(&cp);
+ if(!cp.hFocusWindow||!IsWindowVisible(cp.hFocusWindow))return;
+ lastFrameTick=GetTickCount();
+ if(!frameSeen.exchange(true)){logLine("Game Present observed; backbuffer renderer initialised.");nativeStatus(L"Frames",L"1");}
+ std::unique_lock<std::mutex> guard(catalogMutex);gameWindow=cp.hFocusWindow;inputs();
+ if(!opened)return;
+ BackbufferScope target(dev);HRESULT hr=target.bind();
+ if(FAILED(hr)){graphicsError("Bind presentation backbuffer",hr);closeBrowser();return;}
+ hr=dev->BeginScene();if(FAILED(hr)){graphicsError("Presentation BeginScene",hr);closeBrowser();return;}
+ draw(dev);guard.unlock();
+ if(h.end){hr=h.end(dev);if(FAILED(hr))graphicsError("Presentation EndScene",hr);}
+}static thread_local bool insidePresent=false;
 static HRESULT STDMETHODCALLTYPE presentHook(IDirect3DDevice9* dev,const RECT* src,const RECT* dst,HWND window,const RGNDATA* dirtyRegion) {
  bool nested=insidePresent;insidePresent=true;if(!nested)renderForPresent(dev);auto h=hooksFor(dev);
  HRESULT hr=h.present?h.present(dev,src,dst,window,dirtyRegion):D3DERR_INVALIDCALL;insidePresent=nested;return hr;
@@ -604,7 +676,7 @@ static DWORD WINAPI initialize(void*) {
  WritePrivateProfileStringW(L"Bridge",L"Ready",L"0",bridgePath.c_str());WritePrivateProfileStringW(L"Request",L"Pending",L"0",bridgePath.c_str());
  WritePrivateProfileStringW(L"Audio",L"Menu",L"0",bridgePath.c_str());nativeStatus(L"Frames",L"0");nativeStatus(L"Input",L"0");nativeStatus(L"Hooks",L"0");nativeStatus(L"Error",L"");config();
  auto z=LoadLibraryExW((root+L"Data\\NVSE\\Plugins\\LukesItemBrowser\\zlib1.dll").c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);if(z)inflateFn=(ib::Inflate)GetProcAddress(z,"uncompress");
- logLine("Luke's Item Browser 1.0.1: NVSEPlugin_Load entered; installing game factory hooks.");
+ logLine("Luke's Item Browser 1.0.2: NVSEPlugin_Load entered; installing game factory hooks.");
  if(!inflateFn)failNative("zlib1.dll could not be loaded; compressed item records unavailable");
  renderScale=(int)setting(L"Display",L"RenderScale",2,1,3);
  while(!createCanvas()){if(renderScale<=1){failNative("GDI canvas creation failed");destroyCanvas();return 1;}--renderScale;}
@@ -620,13 +692,13 @@ static DWORD WINAPI initialize(void*) {
  return 0;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEVersionPrefix* nvse,PluginInfo* info) {
- info->infoVersion=1;info->name="Luke's Item Browser";info->version=101;
+ info->infoVersion=1;info->name="Luke's Item Browser";info->version=102;
  wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);root=exe;root=root.substr(0,root.find_last_of(L"\\/")+1);
  if(!nvse){logLine("Query rejected: missing NVSE interface.");return false;}
  if(nvse->isEditor){logLine("Query rejected: this plugin runs in the game, not GECK.");return false;}
  if(nvse->runtimeVersion!=0x040020D0){logLine("Query rejected: unsupported game runtime (requires standard 1.4.0.525).");return false;}
  if(nvse->nvseVersion<6){logLine("Query rejected: xNVSE 6 or newer required.");return false;}
- logLine("Luke's Item Browser 1.0.1: runtime query accepted.");return true;
+ logLine("Luke's Item Browser 1.0.2: runtime query accepted.");return true;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const void*) {
  if(initialize(nullptr)!=0)return false;
